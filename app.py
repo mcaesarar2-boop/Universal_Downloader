@@ -53,10 +53,15 @@ def fetch_formats():
                 # Prioritize formats with height values to avoid audio-only profiles
                 if height and height not in seen_resolutions:
                     seen_resolutions.add(height)
+                    vbr = f.get('vbr')
+                    tbr = f.get('tbr')
+                    bitrate_val = vbr or tbr
+                    bitrate_str = f"~{int(bitrate_val)} kbps" if bitrate_val else "Unknown"
                     parsed_formats.append({
                         'label': f"{height}p - {ext}",
                         'height': height,
-                        'ext': ext
+                        'ext': ext,
+                        'bitrate': bitrate_str
                     })
             
             parsed_formats.sort(key=lambda x: x['height'], reverse=True)

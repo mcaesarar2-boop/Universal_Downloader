@@ -95,7 +95,8 @@ class UniversalVideoDownloader(ctk.CTk):
             self.main_frame,
             values=["Fetch formats to enable..."],
             width=500,
-            state="disabled"
+            state="disabled",
+            command=self._on_format_changed
         )
         self.format_selector.pack(padx=30, pady=(0, 8))
         
@@ -153,12 +154,20 @@ class UniversalVideoDownloader(ctk.CTk):
         self.sub_mode_selector.set("Softsub (Fast Remux to .mkv)")
         
         # Hardsub Video Bitrate Label & Entry
+        self.native_bitrate_label = ctk.CTkLabel(
+            self.main_frame,
+            text="Native Bitrate: Waiting for fetch...",
+            font=ctk.CTkFont(size=11, slant="italic"),
+            text_color="#a3a3a3"
+        )
+        self.native_bitrate_label.pack(anchor="w", padx=30, pady=(4, 0))
+
         self.bitrate_label = ctk.CTkLabel(
             self.main_frame,
             text="Hardsub Video Bitrate (e.g., 1300k, 2000k):",
             font=ctk.CTkFont(size=12, weight="bold")
         )
-        self.bitrate_label.pack(anchor="w", padx=30, pady=(4, 2))
+        self.bitrate_label.pack(anchor="w", padx=30, pady=(2, 2))
         
         self.bitrate_entry = ctk.CTkEntry(
             self.main_frame,
@@ -295,10 +304,15 @@ class UniversalVideoDownloader(ctk.CTk):
                     # Prioritize formats with actual height dimensions
                     if height and height not in seen_resolutions:
                         seen_resolutions.add(height)
+                        vbr = f.get('vbr')
+                        tbr = f.get('tbr')
+                        bitrate_val = vbr or tbr
+                        bitrate_str = f"~{int(bitrate_val)} kbps" if bitrate_val else "Unknown"
                         parsed_formats.append({
                             'label': f"{height}p - {ext}",
                             'height': height,
-                            'ext': ext
+                            'ext': ext,
+                            'bitrate': bitrate_str
                         })
                 
                 # Sort descending by resolution height
@@ -310,9 +324,20 @@ class UniversalVideoDownloader(ctk.CTk):
         except Exception as e:
             self.after(0, lambda: self._on_fetch_failed(str(e)))
 
+    def _on_format_changed(self, selected_option):
+        if hasattr(self, 'fetched_formats_dict') and selected_option in self.fetched_formats_dict:
+            br = self.fetched_formats_dict[selected_option]
+            self.native_bitrate_label.configure(text=f"Native Bitrate: {br}", text_color="#4ade80")
+        else:
+            self.native_bitrate_label.configure(text="Native Bitrate: N/A or Unknown", text_color="#a3a3a3")
+
     def _on_fetch_success(self, parsed_formats):
         self.is_fetching = False
         self.fetch_button.configure(state="normal", text="Fetch Video Formats")
+        
+        # Save fetched formats dict for bitrate lookup
+        self.fetched_formats_dict = {f['label']: f.get('bitrate', 'Unknown') for f in parsed_formats}
+        self.fetched_formats_dict["Best (Default)"] = "N/A (Automatically detects best profile)"
         
         # Create dropdown items list
         dropdown_options = [f['label'] for f in parsed_formats]
@@ -321,6 +346,9 @@ class UniversalVideoDownloader(ctk.CTk):
         # Populate selector and enable
         self.format_selector.configure(values=dropdown_options, state="normal")
         self.format_selector.set(dropdown_options[0])
+        
+        # Update current selected bitrate label
+        self._on_format_changed(dropdown_options[0])
         
         self.update_status(f"Parsed {len(parsed_formats)} formats. Video Title: '{self.video_title}'", "#4ade80")
         self.write_log(f"[system] SUCCESS: Fetched {len(parsed_formats)} unique format profiles. Title: '{self.video_title}'")

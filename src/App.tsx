@@ -693,6 +693,7 @@ export default function App() {
   const [fetchedMetadataSim, setFetchedMetadataSim] = useState<VideoPreset | null>(null);
   const [selectedFormatSim, setSelectedFormatSim] = useState<string>('Fetch formats to enable...');
   const [isFormatMenuEnabled, setIsFormatMenuEnabled] = useState<boolean>(false);
+  const [formatBitratesSim, setFormatBitratesSim] = useState<Record<string, string>>({});
   
   const [subtitleUrlSim, setSubtitleUrlSim] = useState<string>('');
   const [isVerifyingSubSim, setIsVerifyingSubSim] = useState<boolean>(false);
@@ -870,6 +871,13 @@ export default function App() {
           formatsArray.push("Best (Default)");
         }
         
+        const bitratesMap: Record<string, string> = {};
+        data.formats.forEach((f: any) => {
+          bitratesMap[f.label] = f.bitrate || 'Unknown';
+        });
+        bitratesMap["Best (Default)"] = "N/A (Automatically detects best profile)";
+        setFormatBitratesSim(bitratesMap);
+        
         const fetchedMeta = {
           title: data.title,
           formats: formatsArray,
@@ -922,6 +930,15 @@ export default function App() {
       };
 
       setFetchedMetadataSim(foundPreset);
+      
+      const mockBitrates: Record<string, string> = {
+        "1080p - mp4": "~2500 kbps",
+        "720p - mp4": "~1200 kbps",
+        "480p - mp4": "~600 kbps",
+        "Best (Default)": "N/A (Automatically detects best profile)"
+      };
+      setFormatBitratesSim(mockBitrates);
+      
       setIsFormatMenuEnabled(true);
       setSelectedFormatSim(foundPreset.formats[0]);
       setIsFetchingSim(false);
@@ -1454,7 +1471,18 @@ export default function App() {
 
                     {/* Hardsub Video Bitrate Configuration */}
                     <div className="flex flex-col gap-1">
-                      <label className="text-xs font-bold text-slate-300">Hardsub Video Bitrate (e.g., 1300k, 2000k):</label>
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-bold text-slate-300">Hardsub Video Bitrate (e.g., 1300k, 2000k):</label>
+                        <span className={`text-[10px] font-medium transition-all ${
+                          (formatBitratesSim[selectedFormatSim] || "Waiting for fetch...").startsWith('Waiting') 
+                            ? 'text-slate-500 italic' 
+                            : (formatBitratesSim[selectedFormatSim] || "Waiting for fetch...").startsWith('N/A')
+                              ? 'text-yellow-500/80'
+                              : 'text-emerald-400 font-semibold'
+                        }`}>
+                          Native Bitrate: {formatBitratesSim[selectedFormatSim] || "Waiting for fetch..."}
+                        </span>
+                      </div>
                       <input 
                         id="sim-bitrate-input"
                         type="text"
