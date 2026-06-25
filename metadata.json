@@ -1,0 +1,6 @@
+{
+  "name": "Python Video Downloader",
+  "description": "Interactive builder and visual emulator for a professional Python CustomTkinter desktop video downloader powered by yt-dlp.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
