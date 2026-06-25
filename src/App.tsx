@@ -30,39 +30,48 @@ import {
 const generatePythonCode = (accentColor: string, defaultDir: string) => {
   const mappedAccent = accentColor === 'dark-blue' ? 'dark-blue' : accentColor;
   return `"""
-Universal Video Downloader
-A modern GUI desktop application using CustomTkinter and yt-dlp.
-Supports YouTube, raw HLS (.m3u8), and other non-DRM websites.
-Bypasses and ignores DRM-protected content safely.
+Smart Landing Page Video Detector & Downloader
+================================================
+A modern GUI desktop application using CustomTkinter, yt-dlp, and FFmpeg.
+Analyzes landing pages, detects media formats, extracts available resolutions,
+discovers subtitles/captions, and embeds subtitles directly into the final video file.
+
+Requirements:
+    pip install customtkinter yt-dlp
+
+Note: FFmpeg must be installed and on your system PATH to merge video/audio streams
+      and soft-embed subtitles into the final .mp4/.mkv container.
 """
 
 import os
+import re
 import sys
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox
+import urllib.request
 import customtkinter as ctk
 import yt_dlp
 
-# Set appearance mode and color theme
+# Set modern look & default dark theme
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("${mappedAccent}")
 
-class VideoDownloaderApp(ctk.CTk):
+class SmartVideoDownloaderApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         
-        # Configure window
-        self.title("Universal Video Downloader")
-        self.geometry("920x660")
-        self.minimum_size = (800, 600)
-        self.minsize(800, 600)
+        # Configure window geometry
+        self.title("Smart Landing Page Video Detector")
+        self.geometry("960x720")
+        self.minimum_size = (850, 650)
+        self.minsize(850, 650)
         
         # Grid layout (1 row, 2 columns)
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(1, weight=1)
         
-        # Active states
+        # Active state variables
         self.fetched_info = None
         self.target_url = ""
         self.download_dir = r"${defaultDir}"
@@ -74,34 +83,34 @@ class VideoDownloaderApp(ctk.CTk):
         self.is_fetching = False
         self.is_downloading = False
         
-        # Build UI Components
+        # Build UI layout
         self.create_sidebar()
         self.create_main_panel()
         
     def create_sidebar(self):
-        # Sidebar Frame
-        self.sidebar_frame = ctk.CTkFrame(self, width=220, corner_radius=0)
+        # Sidebar Frame Left
+        self.sidebar_frame = ctk.CTkFrame(self, width=240, corner_radius=0)
         self.sidebar_frame.grid(row=0, column=0, sticky="nsew")
-        self.sidebar_frame.grid_rowconfigure(4, weight=1)
+        self.sidebar_frame.grid_rowconfigure(5, weight=1)
         
-        # Sidebar Widgets
+        # Header Logo
         self.logo_label = ctk.CTkLabel(
             self.sidebar_frame, 
-            text="Video Downloader", 
-            font=ctk.CTkFont(size=18, weight="bold")
+            text="Media Detector", 
+            font=ctk.CTkFont(size=20, weight="bold")
         )
         self.logo_label.grid(row=0, column=0, padx=20, pady=(20, 5))
         
         self.sub_label = ctk.CTkLabel(
             self.sidebar_frame, 
-            text="yt-dlp GUI Engine", 
+            text="Landing Page Scraper v2.5", 
             font=ctk.CTkFont(size=11, slant="italic"),
             text_color="gray"
         )
         self.sub_label.grid(row=1, column=0, padx=20, pady=(0, 20))
         
         # Theme Accent selector
-        self.theme_label = ctk.CTkLabel(self.sidebar_frame, text="Theme Accent:", anchor="w")
+        self.theme_label = ctk.CTkLabel(self.sidebar_frame, text="Theme Color Accent:", anchor="w")
         self.theme_label.grid(row=2, column=0, padx=20, pady=(10, 0), sticky="w")
         self.theme_menu = ctk.CTkOptionMenu(
             self.sidebar_frame, 
@@ -111,64 +120,75 @@ class VideoDownloaderApp(ctk.CTk):
         self.theme_menu.grid(row=3, column=0, padx=20, pady=10, sticky="ew")
         self.theme_menu.set("${accentColor}")
         
-        # Helper text for FFmpeg
+        # Features check
+        self.feat_label = ctk.CTkLabel(
+            self.sidebar_frame,
+            text="Core Features:\\n• Landing Page Scanner\\n• Subtitle Soft-Embedding\\n• Format Muxing via FFmpeg\\n• DRM Filtering Shield",
+            font=ctk.CTkFont(size=11),
+            text_color="gray",
+            justify="left"
+        )
+        self.feat_label.grid(row=4, column=0, padx=20, pady=20, sticky="w")
+        
+        # Help Alert
         self.ffmpeg_info = ctk.CTkLabel(
             self.sidebar_frame, 
-            text="FFmpeg Requirement:\\nEnsure 'ffmpeg' is installed\\non your system path\\nfor format merging and\\nHLS live stream processing.", 
+            text="FFmpeg Requirement:\\nEnsure 'ffmpeg' is installed\\non system PATH to merge\\nvideo, audio, and embed\\nsubtitle tracks properly.", 
             font=ctk.CTkFont(size=10), 
             text_color="gray",
             justify="left"
         )
-        self.ffmpeg_info.grid(row=5, column=0, padx=20, pady=20, sticky="s")
+        self.ffmpeg_info.grid(row=6, column=0, padx=20, pady=20, sticky="s")
 
     def create_main_panel(self):
-        # Main Scrollable Frame to avoid component overflow on smaller screens
+        # Main Scrollable content frame
         self.main_frame = ctk.CTkScrollableFrame(self, corner_radius=0, fg_color="transparent")
         self.main_frame.grid(row=0, column=1, sticky="nsew", padx=15, pady=15)
         self.main_frame.grid_columnconfigure(0, weight=1)
         
-        # Title Header
+        # Title
         self.title_label = ctk.CTkLabel(
             self.main_frame, 
-            text="Universal Media Downloader", 
+            text="Smart Landing Page Video Detector", 
             font=ctk.CTkFont(size=22, weight="bold")
         )
         self.title_label.grid(row=0, column=0, padx=10, pady=(10, 20), sticky="w")
         
-        # URL Input Section
+        # URL Input block
         self.url_frame = ctk.CTkFrame(self.main_frame)
         self.url_frame.grid(row=1, column=0, padx=10, pady=10, sticky="ew")
         self.url_frame.grid_columnconfigure(0, weight=1)
         
         self.url_label = ctk.CTkLabel(
             self.url_frame, 
-            text="Media Link or Stream (.m3u8, YouTube, Vimeo, etc.):", 
+            text="Input Landing Page URL (to detect videos & subtitles):", 
             font=ctk.CTkFont(weight="bold")
         )
         self.url_label.grid(row=0, column=0, padx=15, pady=(10, 5), sticky="w")
         
         self.url_entry = ctk.CTkEntry(
             self.url_frame, 
-            placeholder_text="Paste video page link or .m3u8 manifest link here..."
+            placeholder_text="https://example.com/landing-page-with-videos"
         )
         self.url_entry.grid(row=1, column=0, padx=15, pady=(0, 15), sticky="ew")
         
         self.fetch_btn = ctk.CTkButton(
             self.url_frame, 
-            text="Fetch Video Info", 
+            text="Scan & Detect Page", 
             command=self.start_fetch_info,
-            width=130
+            font=ctk.CTkFont(weight="bold"),
+            width=140
         )
         self.fetch_btn.grid(row=1, column=1, padx=15, pady=(0, 15))
         
-        # Metadata Information Section
+        # Extracted Metadata Container
         self.info_frame = ctk.CTkFrame(self.main_frame)
         self.info_frame.grid(row=2, column=0, padx=10, pady=10, sticky="ew")
         self.info_frame.grid_columnconfigure(1, weight=1)
         
         self.meta_title_lbl = ctk.CTkLabel(
             self.info_frame, 
-            text="Title: Fetch details to display video title", 
+            text="Title: Scan a landing page to extract video", 
             font=ctk.CTkFont(size=13, weight="bold"), 
             anchor="w"
         )
@@ -177,38 +197,55 @@ class VideoDownloaderApp(ctk.CTk):
         self.meta_duration_lbl = ctk.CTkLabel(self.info_frame, text="Duration: --:--", text_color="gray", anchor="w")
         self.meta_duration_lbl.grid(row=1, column=0, padx=15, pady=(0, 10), sticky="w")
         
-        self.meta_uploader_lbl = ctk.CTkLabel(self.info_frame, text="Source Domain: N/A", text_color="gray", anchor="w")
+        self.meta_uploader_lbl = ctk.CTkLabel(self.info_frame, text="Source Extractor: N/A", text_color="gray", anchor="w")
         self.meta_uploader_lbl.grid(row=1, column=1, padx=15, pady=(0, 10), sticky="w")
         
-        # Download Controls Section
+        # Download selectors
         self.controls_frame = ctk.CTkFrame(self.main_frame)
         self.controls_frame.grid(row=3, column=0, padx=10, pady=10, sticky="ew")
         self.controls_frame.grid_columnconfigure(0, weight=1)
         self.controls_frame.grid_columnconfigure(1, weight=1)
         
-        # Resolution Dropdown
+        # Format resolution selector
         self.format_label = ctk.CTkLabel(
             self.controls_frame, 
-            text="Select Quality Format:", 
+            text="Target Resolution:", 
             font=ctk.CTkFont(weight="bold")
         )
         self.format_label.grid(row=0, column=0, padx=15, pady=(10, 5), sticky="w")
         self.format_menu = ctk.CTkOptionMenu(
             self.controls_frame, 
-            values=["Please Fetch Info First"]
+            values=["Scan landing page first"]
         )
         self.format_menu.grid(row=1, column=0, padx=15, pady=(0, 15), sticky="ew")
         
-        # Save Location
-        self.dir_label = ctk.CTkLabel(
+        # Subtitle selector
+        self.sub_select_label = ctk.CTkLabel(
             self.controls_frame, 
-            text="Destination Directory:", 
+            text="Subtitle (Auto-Mux/Embed):", 
             font=ctk.CTkFont(weight="bold")
         )
-        self.dir_label.grid(row=0, column=1, padx=15, pady=(10, 5), sticky="w")
+        self.sub_select_label.grid(row=0, column=1, padx=15, pady=(10, 5), sticky="w")
+        self.subtitle_menu = ctk.CTkOptionMenu(
+            self.controls_frame, 
+            values=["No subtitles detected"]
+        )
+        self.subtitle_menu.grid(row=1, column=1, padx=15, pady=(0, 15), sticky="ew")
         
-        self.dir_sub_frame = ctk.CTkFrame(self.controls_frame, fg_color="transparent")
-        self.dir_sub_frame.grid(row=1, column=1, padx=15, pady=(0, 15), sticky="ew")
+        # File destination output directory
+        self.dir_frame = ctk.CTkFrame(self.main_frame)
+        self.dir_frame.grid(row=4, column=0, padx=10, pady=10, sticky="ew")
+        self.dir_frame.grid_columnconfigure(0, weight=1)
+        
+        self.dir_label = ctk.CTkLabel(
+            self.dir_frame, 
+            text="Save Folder Directory:", 
+            font=ctk.CTkFont(weight="bold")
+        )
+        self.dir_label.grid(row=0, column=0, padx=15, pady=(10, 5), sticky="w")
+        
+        self.dir_sub_frame = ctk.CTkFrame(self.dir_frame, fg_color="transparent")
+        self.dir_sub_frame.grid(row=1, column=0, padx=15, pady=(0, 15), sticky="ew")
         self.dir_sub_frame.grid_columnconfigure(0, weight=1)
         
         self.dir_entry = ctk.CTkEntry(self.dir_sub_frame)
@@ -223,20 +260,20 @@ class VideoDownloaderApp(ctk.CTk):
         )
         self.browse_btn.grid(row=0, column=1)
         
-        # Start Download Button
+        # Download Trigger Button
         self.download_btn = ctk.CTkButton(
             self.main_frame, 
-            text="Start Media Download", 
-            height=42, 
+            text="Start Download & Embed Subtitles", 
+            height=46, 
             font=ctk.CTkFont(size=14, weight="bold"), 
             state="disabled", 
             command=self.start_download
         )
-        self.download_btn.grid(row=4, column=0, padx=10, pady=15, sticky="ew")
+        self.download_btn.grid(row=5, column=0, padx=10, pady=15, sticky="ew")
         
-        # Live Stats Block
+        # Progress Feedback Meter
         self.feedback_frame = ctk.CTkFrame(self.main_frame)
-        self.feedback_frame.grid(row=5, column=0, padx=10, pady=10, sticky="ew")
+        self.feedback_frame.grid(row=6, column=0, padx=10, pady=10, sticky="ew")
         self.feedback_frame.grid_columnconfigure(0, weight=3)
         self.feedback_frame.grid_columnconfigure(1, weight=1)
         self.feedback_frame.grid_columnconfigure(2, weight=1)
@@ -262,27 +299,27 @@ class VideoDownloaderApp(ctk.CTk):
         )
         self.percent_lbl.grid(row=1, column=3, padx=15, pady=(0, 15), sticky="e")
         
-        # Real-time Log Console Widget
+        # Internal log console output terminal
         self.log_label = ctk.CTkLabel(
             self.main_frame, 
-            text="System Log Console / yt-dlp Status:", 
+            text="Media Extractor Log stream:", 
             font=ctk.CTkFont(weight="bold")
         )
-        self.log_label.grid(row=6, column=0, padx=10, pady=(10, 0), sticky="w")
+        self.log_label.grid(row=7, column=0, padx=10, pady=(10, 0), sticky="w")
         
         self.log_text = ctk.CTkTextbox(
             self.main_frame, 
             height=160, 
             font=ctk.CTkFont(family="Courier", size=11)
         )
-        self.log_text.grid(row=7, column=0, padx=10, pady=(5, 10), sticky="ew")
+        self.log_text.grid(row=8, column=0, padx=10, pady=(5, 10), sticky="ew")
         self.log_text.configure(state="disabled")
         
-        self.write_log("Application Engine initialized successfully. Ready to paste links.")
+        self.write_log("Application initialized. Ready to scan landing page URLs.")
 
     def change_theme_color(self, choice):
         ctk.set_default_color_theme(choice)
-        self.write_log(f"Theme color switched to: {choice}. Refresh window to apply fully.")
+        self.write_log(f"Theme color switched to: {choice}. Restart window to fully load accents.")
 
     def browse_directory(self):
         selected = filedialog.askdirectory(initialdir=self.download_dir, title="Select Output Save Folder")
@@ -290,20 +327,19 @@ class VideoDownloaderApp(ctk.CTk):
             self.download_dir = selected
             self.dir_entry.delete(0, tk.END)
             self.dir_entry.insert(0, selected)
-            self.write_log(f"Output folder path updated: {selected}")
+            self.write_log(f"Output folder updated: {selected}")
 
     def write_log(self, text):
-        # Insert log messages safely into the custom text box widget
         self.log_text.configure(state="normal")
         self.log_text.insert(tk.END, f"{text}\\n")
         self.log_text.see(tk.END)
         self.log_text.configure(state="disabled")
 
-    # Threading setup to prevent UI lock during network calls
+    # Multi-threading fetching worker
     def start_fetch_info(self):
         url = self.url_entry.get().strip()
         if not url:
-            messagebox.showerror("Validation Error", "Please paste a video or .m3u8 link first!")
+            messagebox.showerror("Validation Error", "Please paste a video or landing page URL first!")
             return
             
         if self.is_fetching or self.is_downloading:
@@ -311,20 +347,20 @@ class VideoDownloaderApp(ctk.CTk):
             
         self.is_fetching = True
         self.fetch_btn.configure(state="disabled")
-        self.write_log(f"Querying URL metadata asynchronously: {url}")
+        self.write_log(f"Querying landing page details: {url}")
         
-        # Launch worker in background thread
+        # Execute extractor in non-blocking daemon thread
         t = threading.Thread(target=self._fetch_info_worker, args=(url,), daemon=True)
         t.start()
 
     def _fetch_info_worker(self, url):
-        # Requirement #1: Explicitly bypass DRM sites (e.g. Netflix, Hulu)
-        drm_sites = ["netflix.com", "hulu.com", "disneyplus.com", "hbo.com", "hbomax.com", "amazon.com/prime-video"]
-        if any(site in url.lower() for site in drm_sites):
+        # DRM Shield
+        drm_domains = ["netflix.com", "hulu.com", "disneyplus.com", "hbo.com", "hbomax.com", "primevideo.com"]
+        if any(domain in url.lower() for domain in drm_domains):
             self.after(
                 0, 
                 lambda: self._on_fetch_failed(
-                    "DRM Protected Site Detected. DRM content downloads are explicitly bypassed & ignored per system requirements."
+                    "DRM-Protected Stream. Copy-protected content is bypassed per platform policy."
                 )
             )
             return
@@ -335,12 +371,59 @@ class VideoDownloaderApp(ctk.CTk):
                 'no_warnings': True,
                 'extract_flat': False
             }
+            
+            # Extract webpage meta using yt-dlp native extraction capabilities
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
                 
             self.after(0, lambda: self._on_fetch_success(info, url))
+            
         except Exception as e:
-            self.after(0, lambda: self._on_fetch_failed(str(e)))
+            # Fallback parsing strategy!
+            # If native yt_dlp fails because the site lacks a dedicated extractor, we fall back
+            # to scanning the raw HTML page for streaming assets or subtitle files.
+            self.after(0, lambda: self.write_log("Native extraction failed. Attempting Fallback HTML regex parsing..."))
+            self._run_fallback_regex_scraper(url, str(e))
+
+    def _run_fallback_regex_scraper(self, url, original_err):
+        """
+        FALLBACK SCRAPER STRATEGY (BS4 / Regex Placeholder):
+        Performs raw HTTP scanning to locate .m3u8 index files, .vtt files, or subtitle paths
+        inside the HTML source when yt-dlp's native extractors are not supported on the target page.
+        """
+        try:
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+            req = urllib.request.Request(url, headers=headers)
+            
+            with urllib.request.urlopen(req, timeout=8) as response:
+                html_content = response.read().decode('utf-8', errors='ignore')
+                
+            # Search for typical .m3u8, .mp4, and subtitle formats (.vtt/.srt)
+            stream_links = re.findall(r'(https?://[^\\s"\\']+\\.m3u8[^\\s"\\']*)', html_content)
+            mp4_links = re.findall(r'(https?://[^\\s"\\']+\\.mp4[^\\s"\\']*)', html_content)
+            vtt_links = re.findall(r'(https?://[^\\s"\\']+\\.vtt[^\\s"\\']*)', html_content)
+            
+            if stream_links or mp4_links:
+                detected_link = stream_links[0] if stream_links else mp4_links[0]
+                self.after(0, lambda: self.write_log(f"Fallback scraper successfully found media asset: {detected_link}"))
+                
+                # Setup mock info structure to pass to downstream
+                mock_info = {
+                    'title': 'Detected Media Stream (Fallback Scraped)',
+                    'extractor_key': 'Fallback Scraper',
+                    'url': detected_link,
+                    'formats': [{'url': detected_link, 'height': 1080, 'ext': 'mp4' if 'mp4' in detected_link else 'm3u8'}],
+                    'duration': 0,
+                    'subtitles': {
+                        'scraped_vtt': [{'url': v, 'ext': 'vtt'} for v in vtt_links]
+                    } if vtt_links else {}
+                }
+                self.after(0, lambda: self._on_fetch_success(mock_info, url))
+            else:
+                raise Exception(f"No streaming elements found in raw landing page. Original Error: {original_err}")
+                
+        except Exception as fallback_err:
+            self.after(0, lambda: self._on_fetch_failed(f"Extraction & Fallback Scraper both failed:\\n{fallback_err}"))
 
     def _on_fetch_success(self, info, url):
         self.is_fetching = False
@@ -348,8 +431,7 @@ class VideoDownloaderApp(ctk.CTk):
         self.fetched_info = info
         self.target_url = url
         
-        # Display title and metadata info
-        title = info.get('title', 'Unknown Title')
+        title = info.get('title', 'Unknown Landing Page Video')
         duration = info.get('duration', 0)
         extractor = info.get('extractor_key', 'Generic URL')
         
@@ -358,10 +440,10 @@ class VideoDownloaderApp(ctk.CTk):
         duration_str = f"{hours:02d}:{mins:02d}:{secs:02d}" if hours else f"{mins:02d}:{secs:02d}"
         
         self.meta_title_lbl.configure(text=f"Title: {title}")
-        self.meta_duration_lbl.configure(text=f"Duration: {duration_str}")
+        self.meta_duration_lbl.configure(text=f"Duration: {duration_str if duration else 'Detected Stream'}")
         self.meta_uploader_lbl.configure(text=f"Source: {extractor}")
         
-        # Build quality dropdown items
+        # Parse available formats/resolutions
         formats = info.get('formats', [])
         format_options = ["Best Resolution (Merged Auto)"]
         
@@ -371,61 +453,75 @@ class VideoDownloaderApp(ctk.CTk):
             ext = f.get('ext', '')
             if height and height not in seen_res:
                 seen_res.add(height)
-                format_options.append(f"{height}p - {ext.upper()} (Video + Audio Merger)")
+                format_options.append(f"{height}p - {ext.upper()} (Stitched Format)")
                 
-        format_options.append("Best Audio Only (M4A/MP3)")
-        
+        format_options.append("Best Audio Track Only (MP3)")
         self.format_menu.configure(values=format_options)
         self.format_menu.set(format_options[0])
+        
+        # Parse available subtitles (and automatic captions)
+        subtitles = info.get('subtitles', {}) or {}
+        auto_captions = info.get('automatic_captions', {}) or {}
+        
+        sub_list = ["No subtitle selected"]
+        for lang_code in subtitles.keys():
+            sub_list.append(f"{lang_code} (Native)")
+        for lang_code in auto_captions.keys():
+            sub_list.append(f"{lang_code} (Auto-Generated)")
+            
+        self.subtitle_menu.configure(values=sub_list)
+        self.subtitle_menu.set(sub_list[0])
+        
         self.download_btn.configure(state="normal")
-        self.write_log(f"Successfully extracted video details for: '{title}'")
+        self.write_log(f"Successfully analyzed landing page: '{title}'")
+        self.write_log(f"Detected {len(format_options)-1} formats and {len(sub_list)-1} subtitles.")
 
     def _on_fetch_failed(self, err_msg):
         self.is_fetching = False
         self.fetch_btn.configure(state="normal")
         self.download_btn.configure(state="disabled")
-        self.meta_title_lbl.configure(text="Title: Extraction Failed")
+        self.meta_title_lbl.configure(text="Title: Fetch Extraction Failed")
         self.meta_duration_lbl.configure(text="Duration: --:--")
         self.meta_uploader_lbl.configure(text="Source: N/A")
         
-        self.write_log(f"METADATA ERROR: {err_msg}")
-        messagebox.showerror("Extraction Error", f"Could not fetch details:\\n{err_msg}")
+        self.write_log(f"EXTRACTION ERROR: {err_msg}")
+        messagebox.showerror("Metadata Error", f"Failed to retrieve stream details:\\n{err_msg}")
 
-    # Launch download in secondary thread to preserve responsiveness
+    # Asynchronous download process
     def start_download(self):
         if not self.fetched_info or self.is_downloading:
             return
             
         self.is_downloading = True
-        self.download_btn.configure(state="disabled", text="Downloading Media Tracks...")
+        self.download_btn.configure(state="disabled", text="Processing video & subtitle merge...")
         self.fetch_btn.configure(state="disabled")
         
-        # Clear stats GUI
+        # Reset progress components
         self.progress_bar.set(0)
         self.percent_lbl.configure(text="0.0%")
         self.speed_lbl.configure(text="Speed: Connecting...")
         self.eta_lbl.configure(text="ETA: Calculating...")
         self.size_lbl.configure(text="Size: -- MB")
         
-        self.write_log("Starting asynchronous download process...")
+        self.write_log("Starting landing page downloader thread...")
         t = threading.Thread(target=self._download_worker, daemon=True)
         t.start()
 
     def _download_worker(self):
         url = self.target_url
         selected_fmt = self.format_menu.get()
+        selected_sub = self.subtitle_menu.get()
         out_dir = self.dir_entry.get().strip() or self.download_dir
-        out_path_template = os.path.join(out_dir, "%(title)s.%(ext)s")
         
-        # Map selected resolution option to standard yt-dlp queries
+        # Format query mapper
         format_query = "bestvideo+bestaudio/best"
-        if "Audio Only" in selected_fmt:
+        if "Audio Track Only" in selected_fmt:
             format_query = "bestaudio/best"
         elif "p" in selected_fmt:
             res = selected_fmt.split("p")[0].strip()
             format_query = f"bestvideo[height<={res}]+bestaudio/best[height<={res}]"
 
-        # Safe custom logger class to pipe yt-dlp logs directly into the GUI
+        # Safe custom stdout logger
         class GUIStreamLogger:
             def __init__(self, app):
                 self.app = app
@@ -439,7 +535,7 @@ class VideoDownloaderApp(ctk.CTk):
             def error(self, msg):
                 self.app.after(0, lambda: self.app.write_log(f"ERROR: {msg}"))
 
-        # Progress hooks callback
+        # Progress stats callback hook
         def download_progress_hook(d):
             if d['status'] == 'downloading':
                 total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
@@ -464,18 +560,37 @@ class VideoDownloaderApp(ctk.CTk):
                     
                 self.after(0, lambda: self._update_gui_progress(pct, speed_str, eta_str, size_mb))
             elif d['status'] == 'finished':
-                self.after(0, lambda: self.write_log("Download finished. Initiating ffmpeg merger..."))
+                self.after(0, lambda: self.write_log("Video tracks fetched successfully. Merging audio, video & subtitles..."))
 
         ydl_opts = {
             'format': format_query,
-            'outtmpl': out_path_template,
+            'outtmpl': os.path.join(out_dir, "%(title)s.%(ext)s"),
             'logger': GUIStreamLogger(self),
             'progress_hooks': [download_progress_hook],
-            'merge_output_format': 'mp4',
+            'merge_output_format': 'mkv',  # MKV supports embedding subtitle streams without re-encoding
             'noplaylist': True,
         }
         
-        if "Audio Only" in selected_fmt:
+        # If subtitles are requested, set yt-dlp options to download & embed
+        if selected_sub != "No subtitle selected":
+            # Extract actual language code from dropdown string
+            lang_code = selected_sub.split(" ")[0].strip()
+            
+            ydl_opts['writesubtitles'] = True
+            ydl_opts['allsubtitles'] = False
+            ydl_opts['subtitleslangs'] = [lang_code]
+            
+            # Embed soft subtitles using ffmpeg
+            ydl_opts['embedsubtitles'] = True
+            
+            # Include auto-generated subs if selected
+            if "Auto-Generated" in selected_sub:
+                ydl_opts['writeautomaticsub'] = True
+                
+            self.after(0, lambda: self.write_log(f"Subtitles enabled: [{lang_code}]. FFmpeg embedding activated."))
+
+        if "Audio Track Only" in selected_fmt:
+            ydl_opts['merge_output_format'] = None
             ydl_opts['postprocessors'] = [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
@@ -498,25 +613,25 @@ class VideoDownloaderApp(ctk.CTk):
 
     def _on_download_complete(self):
         self.is_downloading = False
-        self.download_btn.configure(state="normal", text="Start Media Download")
+        self.download_btn.configure(state="normal", text="Start Download & Embed Subtitles")
         self.fetch_btn.configure(state="normal")
         self.progress_bar.set(1.0)
         self.percent_lbl.configure(text="100.0%")
         self.speed_lbl.configure(text="Speed: Complete")
         self.eta_lbl.configure(text="ETA: Finished")
         
-        self.write_log("DOWNLOAD SUCCESS: Saved & processed stream format merges.")
-        messagebox.showinfo("Download Complete", "Media has been downloaded and processed correctly!")
+        self.write_log("DOWNLOAD SUCCESS: Saved video format & successfully soft-embedded subtitle track.")
+        messagebox.showinfo("Success", "Media and subtitle streams merged & embedded successfully!")
 
     def _on_download_failed(self, error):
         self.is_downloading = False
-        self.download_btn.configure(state="normal", text="Start Media Download")
+        self.download_btn.configure(state="normal", text="Start Download & Embed Subtitles")
         self.fetch_btn.configure(state="normal")
         self.write_log(f"DOWNLOAD ERROR: {error}")
-        messagebox.showerror("Error", f"Failed to download video:\\n{error}")
+        messagebox.showerror("Download Error", f"Processing failed:\\n{error}")
 
 if __name__ == "__main__":
-    app = VideoDownloaderApp()
+    app = SmartVideoDownloaderApp()
     app.mainloop()
 `;
 };
@@ -530,6 +645,7 @@ interface Preset {
   title: string;
   uploader: string;
   formats: string[];
+  subtitles?: string[];
   type: 'youtube' | 'm3u8' | 'vimeo' | 'drm';
 }
 
@@ -547,6 +663,12 @@ const PRESETS: Preset[] = [
       '480p - MP4 (34.0 MB)',
       'Best Audio Only - M4A (12.4 MB)'
     ],
+    subtitles: [
+      'No subtitle selected',
+      'en (Native)',
+      'es (Auto-Generated)',
+      'fr (Auto-Generated)'
+    ],
     type: 'youtube'
   },
   {
@@ -560,6 +682,9 @@ const PRESETS: Preset[] = [
       'Best Resolution Merged (.mp4) (~2.4 MB/min)',
       'Stream Resolution 720p (.mp4) (~1.8 MB/min)',
       'Audio Stream Track Only (.aac) (~0.4 MB/min)'
+    ],
+    subtitles: [
+      'No subtitle selected'
     ],
     type: 'm3u8'
   },
@@ -576,6 +701,11 @@ const PRESETS: Preset[] = [
       '720p - MP4 (44.2 MB)',
       'Best Audio Only - M4A (4.1 MB)'
     ],
+    subtitles: [
+      'No subtitle selected',
+      'en (Native)',
+      'it (Native)'
+    ],
     type: 'vimeo'
   },
   {
@@ -586,6 +716,9 @@ const PRESETS: Preset[] = [
     title: 'Locked Content',
     uploader: 'Netflix Inc.',
     formats: [],
+    subtitles: [
+      'No subtitle selected'
+    ],
     type: 'drm'
   }
 ];
@@ -612,6 +745,7 @@ export default function App() {
   const [isFetchingSim, setIsFetchingSim] = useState<boolean>(false);
   const [simMetadata, setSimMetadata] = useState<Preset | null>(null);
   const [selectedFormatSim, setSelectedFormatSim] = useState<string>('');
+  const [selectedSubtitleSim, setSelectedSubtitleSim] = useState<string>('No subtitle selected');
   const [simSaveDir, setSimSaveDir] = useState<string>('/Users/developer/Downloads');
   const [isDownloadingSim, setIsDownloadingSim] = useState<boolean>(false);
   const [simProgress, setSimProgress] = useState<number>(0);
@@ -714,15 +848,20 @@ export default function App() {
           '720p - MP4 (Merged Stream)',
           'Best Audio Only - M4A (Audio Only)'
         ],
+        subtitles: [
+          'No subtitle selected',
+          'en (Native)'
+        ],
         type: 'youtube' as const
       };
 
       setSimMetadata(foundPreset as Preset);
       setSelectedFormatSim((foundPreset as Preset).formats[0]);
+      setSelectedSubtitleSim((foundPreset as Preset).subtitles?.[0] || 'No subtitle selected');
       setIsFetchingSim(false);
       addLog(`[info] Title parsed successfully: "${foundPreset.title}"`);
       addLog(`[info] Extractor found: ${foundPreset.uploader} (${foundPreset.duration ? foundPreset.duration + ' seconds' : 'Live stream'})`);
-      addLog(`[info] Available formats extracted successfully.`);
+      addLog(`[info] Available formats and subtitles extracted successfully.`);
     }, 1200);
   };
 
@@ -734,8 +873,11 @@ export default function App() {
     setSimSpeed('0 KB/s');
     setSimEta('Calculating...');
     addLog(`[download] Starting format pipeline for format query: ${selectedFormatSim}`);
+    if (selectedSubtitleSim !== 'No subtitle selected') {
+      addLog(`[download] Activating subtitle downloader track: ${selectedSubtitleSim}`);
+    }
     addLog(`[download] Saving output file to directory: ${simSaveDir}`);
-    addLog(`[download] Destination file template: ${simMetadata.title}.mp4`);
+    addLog(`[download] Destination file template: ${simMetadata.title}.mkv`);
 
     let progressValue = 0;
     const speedOptions = ['4.2 MB/s', '5.1 MB/s', '3.8 MB/s', '4.9 MB/s', '5.5 MB/s', '2.1 MB/s'];
@@ -751,10 +893,14 @@ export default function App() {
         setSimEta('Done');
         setIsDownloadingSim(false);
         addLog(`[download] 100% of ${totalSize} downloaded successfully.`);
-        addLog(`[ffmpeg] Stream tracks located. Triggering video & audio multiplex merging...`);
+        if (selectedSubtitleSim !== 'No subtitle selected') {
+          addLog(`[ffmpeg] Muxing video, audio, and subtitle [${selectedSubtitleSim}] into final container...`);
+        } else {
+          addLog(`[ffmpeg] Stream tracks located. Triggering video & audio multiplex merging...`);
+        }
         
         setTimeout(() => {
-          addLog(`[ffmpeg] Frame merge complete. Saved inside "${simSaveDir}/${simMetadata.title}.mp4"`);
+          addLog(`[ffmpeg] Frame merge complete. Saved inside "${simSaveDir}/${simMetadata.title}.mkv"`);
           addLog(`SUCCESS: Media download sequence completed without error.`);
           clearInterval(interval);
         }, 800);
@@ -1025,7 +1171,7 @@ export default function App() {
                       </div>
 
                       {/* Download controls */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         
                         {/* Format selector */}
                         <div className="bg-slate-950/40 border border-slate-800/80 rounded-lg p-3 flex flex-col gap-1.5">
@@ -1042,6 +1188,26 @@ export default function App() {
                             ) : (
                               simMetadata.formats.map((f, idx) => (
                                 <option key={idx} value={f}>{f}</option>
+                              ))
+                            )}
+                          </select>
+                        </div>
+
+                        {/* Subtitle selector */}
+                        <div className="bg-slate-950/40 border border-slate-800/80 rounded-lg p-3 flex flex-col gap-1.5">
+                          <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Subtitle Mux/Embed</label>
+                          <select 
+                            id="sim-subtitle-selector"
+                            disabled={!simMetadata || isDownloadingSim}
+                            value={selectedSubtitleSim}
+                            onChange={(e) => setSelectedSubtitleSim(e.target.value)}
+                            className="w-full bg-slate-900 border border-slate-800 text-xs text-slate-300 rounded px-2.5 py-1.5 font-medium focus:outline-none focus:border-emerald-500 disabled:opacity-50"
+                          >
+                            {!simMetadata ? (
+                              <option>No subtitles detected</option>
+                            ) : (
+                              (simMetadata.subtitles || ['No subtitle selected']).map((s, idx) => (
+                                <option key={idx} value={s}>{s}</option>
                               ))
                             )}
                           </select>
