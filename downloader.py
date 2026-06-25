@@ -19,6 +19,7 @@ import shutil
 import threading
 import subprocess
 import requests
+import re
 import tkinter as tk
 from tkinter import messagebox
 import customtkinter as ctk
@@ -34,7 +35,7 @@ class UniversalVideoDownloader(ctk.CTk):
         
         # Window configuration
         self.title("Universal Video Downloader")
-        self.geometry("640x650")
+        self.geometry("660x860")
         self.resizable(False, False)
         
         # State variables
@@ -43,6 +44,7 @@ class UniversalVideoDownloader(ctk.CTk):
         self.is_verifying_subtitle = False
         self.fetched_formats_info = []
         self.video_title = ""
+        self.last_logged_pct = -1
         
         # Main layout frame
         self.main_frame = ctk.CTkFrame(self, corner_radius=15)
@@ -54,7 +56,7 @@ class UniversalVideoDownloader(ctk.CTk):
             text="Universal Video Downloader",
             font=ctk.CTkFont(size=22, weight="bold")
         )
-        self.title_lbl.pack(pady=(20, 15))
+        self.title_lbl.pack(pady=(15, 10))
         
         # 1. Video URL Input Area
         self.url_label = ctk.CTkLabel(
@@ -62,14 +64,14 @@ class UniversalVideoDownloader(ctk.CTk):
             text="Video / Stream / HLS URL:",
             font=ctk.CTkFont(size=12, weight="bold")
         )
-        self.url_label.pack(anchor="w", padx=30, pady=(5, 2))
+        self.url_label.pack(anchor="w", padx=30, pady=(4, 2))
         
         self.video_url_entry = ctk.CTkEntry(
             self.main_frame,
             placeholder_text="Enter video or HLS playlist URL (e.g., https://...)",
             width=500
         )
-        self.video_url_entry.pack(padx=30, pady=(0, 10))
+        self.video_url_entry.pack(padx=30, pady=(0, 8))
         
         # 2. Fetch Button
         self.fetch_button = ctk.CTkButton(
@@ -79,7 +81,7 @@ class UniversalVideoDownloader(ctk.CTk):
             font=ctk.CTkFont(weight="bold"),
             width=200
         )
-        self.fetch_button.pack(pady=5)
+        self.fetch_button.pack(pady=4)
         
         # 3. Format Selector Dropdown (Initially Disabled)
         self.format_label = ctk.CTkLabel(
@@ -87,7 +89,7 @@ class UniversalVideoDownloader(ctk.CTk):
             text="Select Quality Format:",
             font=ctk.CTkFont(size=12, weight="bold")
         )
-        self.format_label.pack(anchor="w", padx=30, pady=(10, 2))
+        self.format_label.pack(anchor="w", padx=30, pady=(8, 2))
         
         self.format_selector = ctk.CTkOptionMenu(
             self.main_frame,
@@ -95,7 +97,7 @@ class UniversalVideoDownloader(ctk.CTk):
             width=500,
             state="disabled"
         )
-        self.format_selector.pack(padx=30, pady=(0, 10))
+        self.format_selector.pack(padx=30, pady=(0, 8))
         
         # 4. Subtitle URL Input Area (Optional)
         self.sub_label = ctk.CTkLabel(
@@ -103,7 +105,7 @@ class UniversalVideoDownloader(ctk.CTk):
             text="Subtitle URL (Optional - handles dynamic PHP/vtt/srt):",
             font=ctk.CTkFont(size=12, weight="bold")
         )
-        self.sub_label.pack(anchor="w", padx=30, pady=(10, 2))
+        self.sub_label.pack(anchor="w", padx=30, pady=(8, 2))
         
         # Horizontal frame for subtitle entry and fetch/verify button
         self.sub_input_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
@@ -132,7 +134,7 @@ class UniversalVideoDownloader(ctk.CTk):
             font=ctk.CTkFont(size=11, slant="italic"),
             text_color="#a3a3a3"
         )
-        self.subtitle_status_label.pack(anchor="w", padx=30, pady=(0, 4))
+        self.subtitle_status_label.pack(anchor="w", padx=30, pady=(0, 3))
         
         # Subtitle Processing Mode label & Segmented Button
         self.sub_mode_label = ctk.CTkLabel(
@@ -140,14 +142,14 @@ class UniversalVideoDownloader(ctk.CTk):
             text="Subtitle Processing Mode:",
             font=ctk.CTkFont(size=12, weight="bold")
         )
-        self.sub_mode_label.pack(anchor="w", padx=30, pady=(4, 2))
+        self.sub_mode_label.pack(anchor="w", padx=30, pady=(3, 2))
         
         self.sub_mode_selector = ctk.CTkSegmentedButton(
             self.main_frame,
             values=["Softsub (Fast Remux to .mkv)", "Hardsub (Burn-in Re-encode to .mp4)"],
             width=500
         )
-        self.sub_mode_selector.pack(padx=30, pady=(0, 10))
+        self.sub_mode_selector.pack(padx=30, pady=(0, 8))
         self.sub_mode_selector.set("Softsub (Fast Remux to .mkv)")
         
         # 5. Custom Filename Input Area (Optional)
@@ -156,14 +158,14 @@ class UniversalVideoDownloader(ctk.CTk):
             text="Custom Filename (Optional):",
             font=ctk.CTkFont(size=12, weight="bold")
         )
-        self.filename_label.pack(anchor="w", padx=30, pady=(10, 2))
+        self.filename_label.pack(anchor="w", padx=30, pady=(8, 2))
         
         self.custom_filename_entry = ctk.CTkEntry(
             self.main_frame,
             placeholder_text="Leave blank to use the video's original title",
             width=500
         )
-        self.custom_filename_entry.pack(padx=30, pady=(0, 15))
+        self.custom_filename_entry.pack(padx=30, pady=(0, 10))
         
         # 6. Download Button
         self.download_button = ctk.CTkButton(
@@ -176,12 +178,22 @@ class UniversalVideoDownloader(ctk.CTk):
             fg_color="#1f538d",
             hover_color="#14375e"
         )
-        self.download_button.pack(pady=(5, 10))
+        self.download_button.pack(pady=(4, 8))
         
         # 7. Progress UI Components
-        self.progress_bar = ctk.CTkProgressBar(self.main_frame, width=500)
-        self.progress_bar.pack(padx=30, pady=(5, 5))
+        self.progress_container = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        self.progress_container.pack(fill="x", padx=30, pady=(4, 4))
+        
+        self.progress_bar = ctk.CTkProgressBar(self.progress_container, width=420)
+        self.progress_bar.pack(side="left", fill="x", expand=True, padx=(0, 10))
         self.progress_bar.set(0)
+        
+        self.percentage_label = ctk.CTkLabel(
+            self.progress_container,
+            text="0.0%",
+            font=ctk.CTkFont(size=11, weight="bold")
+        )
+        self.percentage_label.pack(side="right")
         
         self.status_label = ctk.CTkLabel(
             self.main_frame,
@@ -190,7 +202,26 @@ class UniversalVideoDownloader(ctk.CTk):
             text_color="#a3a3a3",
             wraplength=520
         )
-        self.status_label.pack(padx=30, pady=(0, 15))
+        self.status_label.pack(padx=30, pady=(0, 10))
+        
+        # 8. Live Terminal Log Label and Textbox
+        self.terminal_label = ctk.CTkLabel(
+            self.main_frame,
+            text="Live Terminal Log:",
+            font=ctk.CTkFont(size=12, weight="bold")
+        )
+        self.terminal_label.pack(anchor="w", padx=30, pady=(8, 2))
+        
+        self.terminal_box = ctk.CTkTextbox(
+            self.main_frame,
+            width=500,
+            height=150,
+            font=ctk.CTkFont(family="Courier", size=10),
+            fg_color="black",
+            text_color="#00ff00",
+            state="disabled"
+        )
+        self.terminal_box.pack(padx=30, pady=(0, 10), fill="both", expand=True)
 
     # Safe helpers to update UI states from background threads
     def update_status(self, text, color="#a3a3a3"):
@@ -198,6 +229,14 @@ class UniversalVideoDownloader(ctk.CTk):
 
     def set_progress(self, val):
         self.progress_bar.set(val)
+
+    def write_log(self, text):
+        def _append():
+            self.terminal_box.configure(state="normal")
+            self.terminal_box.insert("end", text + "\n")
+            self.terminal_box.configure(state="disabled")
+            self.terminal_box.see("end")
+        self.after(0, _append)
 
     # ==================== PHASE 1: Fetching Formats ====================
     def start_fetch_formats(self):
@@ -212,6 +251,7 @@ class UniversalVideoDownloader(ctk.CTk):
         self.is_fetching = True
         self.fetch_button.configure(state="disabled", text="Fetching info...")
         self.update_status("Querying video details from server... Please wait.")
+        self.write_log(f"[system] Fetching format options for URL: {url}")
         
         # Spin up daemon thread to prevent freezing the main UI
         thread = threading.Thread(target=self._fetch_formats_worker, args=(url,), daemon=True)
@@ -224,6 +264,7 @@ class UniversalVideoDownloader(ctk.CTk):
                 'no_warnings': True,
                 'extract_flat': False,
             }
+            self.write_log("[yt-dlp] Querying remote metadata...")
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
                 self.video_title = info.get('title', 'video')
@@ -267,6 +308,7 @@ class UniversalVideoDownloader(ctk.CTk):
         self.format_selector.set(dropdown_options[0])
         
         self.update_status(f"Parsed {len(parsed_formats)} formats. Video Title: '{self.video_title}'", "#4ade80")
+        self.write_log(f"[system] SUCCESS: Fetched {len(parsed_formats)} unique format profiles. Title: '{self.video_title}'")
 
     def _on_fetch_failed(self, error_msg):
         self.is_fetching = False
@@ -274,6 +316,7 @@ class UniversalVideoDownloader(ctk.CTk):
         self.format_selector.configure(values=["Fetch formats to enable..."], state="disabled")
         self.format_selector.set("Fetch formats to enable...")
         self.update_status(f"Error fetching formats: {error_msg}", "#f87171")
+        self.write_log(f"[system] ERROR: Metadata fetch failed: {error_msg}")
         messagebox.showerror("Format Extraction Failed", f"Failed to retrieve format details:\n{error_msg}")
 
     # ==================== SUBTITLE VERIFICATION ====================
@@ -289,6 +332,7 @@ class UniversalVideoDownloader(ctk.CTk):
         self.is_verifying_subtitle = True
         self.verify_sub_button.configure(state="disabled", text="Verifying...")
         self.subtitle_status_label.configure(text="Fetching & validating subtitle...", text_color="#60a5fa")
+        self.write_log(f"[system] Requesting subtitle file verification: {url}")
         
         # Run background thread
         thread = threading.Thread(target=self._verify_subtitle_worker, args=(url,), daemon=True)
@@ -336,11 +380,13 @@ class UniversalVideoDownloader(ctk.CTk):
         self.is_verifying_subtitle = False
         self.verify_sub_button.configure(state="normal", text="Verify Subtitle")
         self.subtitle_status_label.configure(text="✅ Subtitle Fetched & Validated!", text_color="#4ade80")
+        self.write_log("[system] SUCCESS: Subtitle fetched & verified successfully as WebVTT.")
 
     def _on_verify_subtitle_failed(self, error_msg):
         self.is_verifying_subtitle = False
         self.verify_sub_button.configure(state="normal", text="Verify Subtitle")
         self.subtitle_status_label.configure(text="❌ Error: Invalid Subtitle Link or Format", text_color="#f87171")
+        self.write_log(f"[system] ERROR: Subtitle verification failed: {error_msg}")
 
     # ==================== PHASE 2: Downloading & Merging ====================
     def start_download(self):
@@ -366,10 +412,15 @@ class UniversalVideoDownloader(ctk.CTk):
         self.is_downloading = True
         self.download_button.configure(state="disabled", text="Downloading...")
         self.set_progress(0)
+        self.percentage_label.configure(text="0.0%")
         self.update_status("Initializing download pipeline...")
+        self.last_logged_pct = -1
         
         # Get subtitle mode from selector
         sub_mode = self.sub_mode_selector.get()
+        
+        self.write_log(f"[system] Initializing download pipeline for URL: {url}")
+        self.write_log(f"[system] Selected Subtitle Mode: {sub_mode}")
         
         # Spin up daemon thread to prevent freezing the main UI
         thread = threading.Thread(target=self._download_worker, args=(url, sub_mode), daemon=True)
@@ -392,6 +443,8 @@ class UniversalVideoDownloader(ctk.CTk):
             out_template = "%(title)s.%(ext)s"
             final_display_name = self.video_title or "Downloaded Video"
 
+        self.write_log(f"[system] Output template set to: {out_template}")
+
         # Map selected dropdown resolution back to yt-dlp queries
         format_query = 'bestvideo+bestaudio/best'
         if selected_fmt != "Best (Default)" and "p" in selected_fmt:
@@ -400,6 +453,8 @@ class UniversalVideoDownloader(ctk.CTk):
                 format_query = f"bestvideo[height<={res}]+bestaudio/best[height<={res}]"
             except:
                 pass
+
+        self.write_log(f"[system] Resolution selection pattern: {format_query}")
 
         # Progress hooks for live progress bar
         def progress_hook(d):
@@ -426,10 +481,21 @@ class UniversalVideoDownloader(ctk.CTk):
                     
                 status_text = f"Downloading: {pct_percentage:.1f}% | Speed: {speed_str} | ETA: {eta_str}"
                 self.after(0, lambda: self.set_progress(pct))
+                self.after(0, lambda: self.percentage_label.configure(text=f"{pct_percentage:.1f}%"))
                 self.after(0, lambda: self.update_status(status_text, "#60a5fa"))
+                
+                # Throttle terminal logging to whole percent steps to avoid lagging UI thread
+                current_pct_int = int(pct_percentage)
+                if current_pct_int > self.last_logged_pct:
+                    self.last_logged_pct = current_pct_int
+                    dl_mb = downloaded / (1024 * 1024)
+                    tot_mb = total / (1024 * 1024)
+                    log_line = f"[yt-dlp] Progress: {pct_percentage:.1f}% ({dl_mb:.1f}MB/{tot_mb:.1f}MB) | Speed: {speed_str} | ETA: {eta_str}"
+                    self.write_log(log_line)
                 
             elif d['status'] == 'finished':
                 self.after(0, lambda: self.update_status("Video download complete. Merging streams..."))
+                self.write_log("[yt-dlp] Video download complete. Moving to post-processing step...")
 
         ydl_opts = {
             'format': format_query,
@@ -446,6 +512,7 @@ class UniversalVideoDownloader(ctk.CTk):
 
         try:
             # 1. First download the video using yt-dlp (Common to both A and B)
+            self.write_log("[yt-dlp] Launching download engine...")
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info_dict = ydl.extract_info(url, download=True)
                 
@@ -494,12 +561,15 @@ class UniversalVideoDownloader(ctk.CTk):
                 if not final_video_path or not os.path.exists(final_video_path):
                     raise FileNotFoundError("yt-dlp completed downloading, but the final video file could not be located on disk.")
 
+            self.write_log(f"[system] Local raw video file verified: {final_video_path}")
+
             # 2. Subtitle Processing & Remuxing
             has_subtitle = os.path.exists(temp_subs_path)
             
             # If temp_subs.vtt doesn't exist yet but the user filled in the subtitle URL field, fetch it now
             if not has_subtitle and subtitle_url:
                 self.after(0, lambda: self.update_status("Fetching subtitle track from URL..."))
+                self.write_log(f"[system] Subtitle track temp_subs.vtt not found. Fetching fallback from: {subtitle_url}")
                 
                 # Download subtitle content via requests
                 headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
@@ -511,6 +581,7 @@ class UniversalVideoDownloader(ctk.CTk):
                 with open(temp_subs_path, "w", encoding="utf-8") as sub_file:
                     sub_file.write(sub_content)
                 has_subtitle = True
+                self.write_log(f"[system] Subtitle download complete. Saved as 'temp_subs.vtt'")
                 
             if has_subtitle:
                 # Mux or burn-in subtitles depending on the selected mode
@@ -549,10 +620,48 @@ class UniversalVideoDownloader(ctk.CTk):
                         output_video_path
                     ]
                 
-                # Execute FFmpeg subprocess safely capturing stderr and stdout
-                process = subprocess.run(cmd, capture_output=True, text=True)
+                self.write_log(f"[FFmpeg] Executing command:\n{' '.join(cmd)}")
+                
+                # Execute FFmpeg subprocess safely capturing real-time logs via Popen
+                process = subprocess.Popen(
+                    cmd, 
+                    stdout=subprocess.PIPE, 
+                    stderr=subprocess.STDOUT, 
+                    text=True, 
+                    bufsize=1, 
+                    universal_newlines=True
+                )
+                
+                for line in process.stdout:
+                    clean_line = line.strip()
+                    if clean_line:
+                        self.write_log(f"[FFmpeg] {clean_line}")
+                        
+                        # Parse frame=, time=, speed= using regex
+                        frame_match = re.search(r'frame=\s*(\d+)', clean_line)
+                        time_match = re.search(r'time=\s*([\d:\.]+)', clean_line)
+                        speed_match = re.search(r'speed=\s*([\d\.]+)x', clean_line)
+                        
+                        frame_val = frame_match.group(1) if frame_match else None
+                        time_val = time_match.group(1) if time_match else None
+                        speed_val = speed_match.group(1) if speed_match else None
+                        
+                        if frame_val or time_val:
+                            status_msg = "Re-encoding (Hardsub)..." if is_hardsub else "Remuxing (Softsub)..."
+                            details = []
+                            if frame_val:
+                                details.append(f"Frame: {frame_val}")
+                            if time_val:
+                                details.append(f"Time: {time_val}")
+                            if speed_val:
+                                details.append(f"Speed: {speed_val}x")
+                            
+                            status_text = f"{status_msg} " + " | ".join(details)
+                            self.after(0, lambda text=status_text: self.update_status(text, "#60a5fa"))
+                
+                process.wait()
                 if process.returncode != 0:
-                    raise Exception(f"FFmpeg Error:\n{process.stderr}")
+                    raise Exception(f"FFmpeg execution failed with code {process.returncode}. Check terminal log for error stream.")
                 
                 if os.path.exists(output_video_path):
                     # Remove original raw input video file
@@ -572,6 +681,7 @@ class UniversalVideoDownloader(ctk.CTk):
                     final_video_path = output_video_path
                     msg = "Subtitle track hardsubbed successfully." if is_hardsub else "Subtitle track remuxed successfully."
                     self.after(0, lambda: self.update_status(msg, "#4ade80"))
+                    self.write_log(f"[system] {msg}")
                 else:
                     raise Exception("FFmpeg execution finished, but the output file was not generated.")
 
@@ -592,13 +702,16 @@ class UniversalVideoDownloader(ctk.CTk):
         self.is_downloading = False
         self.download_button.configure(state="normal", text="Download")
         self.set_progress(1.0)
+        self.percentage_label.configure(text="100.0%")
         self.update_status(f"Download complete! Saved as '{os.path.basename(filepath)}'", "#4ade80")
+        self.write_log(f"[system] SUCCESS: Download & post-processing complete. Saved file: {filepath}")
         messagebox.showinfo("Success", f"Video download and pipeline process completed successfully!\nSaved to: {os.path.abspath(filepath)}")
 
     def _on_download_failed(self, error_msg):
         self.is_downloading = False
         self.download_button.configure(state="normal", text="Download")
         self.update_status(f"Error: {error_msg}", "#f87171")
+        self.write_log(f"[system] ERROR: Download/merge pipeline failed: {error_msg}")
         messagebox.showerror("Download Failed", f"An error occurred during download or post-processing:\n{error_msg}")
 
 if __name__ == "__main__":

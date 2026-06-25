@@ -1294,12 +1294,17 @@ export default function App() {
                     {/* 7. Progress UI (Progress bar and Status label) */}
                     <div className="flex flex-col gap-2 mt-2 pt-3 border-t border-slate-800/60">
                       
-                      {/* CTkProgressBar visual */}
-                      <div className="w-full bg-slate-950 rounded-full h-2 overflow-hidden border border-slate-800">
-                        <div 
-                          className="h-full bg-blue-500 transition-all duration-300 rounded-full"
-                          style={{ width: `${simProgress * 100}%` }}
-                        ></div>
+                      {/* CTkProgressBar visual with Percentage Label */}
+                      <div className="flex items-center gap-3">
+                        <div className="flex-1 bg-slate-950 rounded-full h-2 overflow-hidden border border-slate-800">
+                          <div 
+                            className="h-full bg-blue-500 transition-all duration-300 rounded-full"
+                            style={{ width: `${simProgress * 100}%` }}
+                          ></div>
+                        </div>
+                        <span className="text-[11px] font-mono font-bold text-slate-300 min-w-[42px] text-right">
+                          {(simProgress * 100).toFixed(1)}%
+                        </span>
                       </div>
 
                       {/* CTkLabel status message wrapper */}
