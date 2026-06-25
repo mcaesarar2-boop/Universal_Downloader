@@ -60,12 +60,13 @@ class UniversalVideoDownloader(ctk.CTk):
         
         # Window configuration
         self.title("Universal Video Downloader")
-        self.geometry("640x520")
+        self.geometry("640x580")
         self.resizable(False, False)
         
         # State variables
         self.is_fetching = False
         self.is_downloading = False
+        self.is_verifying_subtitle = False
         self.fetched_formats_info = []
         self.video_title = ""
         
@@ -130,12 +131,34 @@ class UniversalVideoDownloader(ctk.CTk):
         )
         self.sub_label.pack(anchor="w", padx=30, pady=(10, 2))
         
+        # Horizontal frame for subtitle entry and fetch/verify button
+        self.sub_input_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        self.sub_input_frame.pack(fill="x", padx=30, pady=(0, 2))
+        
         self.subtitle_url_entry = ctk.CTkEntry(
-            self.main_frame,
+            self.sub_input_frame,
             placeholder_text="e.g., http://example.com/subtitle.php?pid=123 or standard VTT/SRT URL",
-            width=500
+            width=360
         )
-        self.subtitle_url_entry.pack(padx=30, pady=(0, 10))
+        self.subtitle_url_entry.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        
+        self.verify_sub_button = ctk.CTkButton(
+            self.sub_input_frame,
+            text="Verify Subtitle",
+            command=self.start_verify_subtitle,
+            font=ctk.CTkFont(size=11, weight="bold"),
+            width=120
+        )
+        self.verify_sub_button.pack(side="right")
+        
+        # Subtitle verification status label
+        self.subtitle_status_label = ctk.CTkLabel(
+            self.main_frame,
+            text="Status: Not verified (optional)",
+            font=ctk.CTkFont(size=11, slant="italic"),
+            text_color="#a3a3a3"
+        )
+        self.subtitle_status_label.pack(anchor="w", padx=30, pady=(0, 10))
         
         # 5. Custom Filename Input Area (Optional)
         self.filename_label = ctk.CTkLabel(
@@ -178,14 +201,14 @@ class UniversalVideoDownloader(ctk.CTk):
             wraplength=520
         )
         self.status_label.pack(padx=30, pady=(0, 15))
- 
+
     # Safe helpers to update UI states from background threads
     def update_status(self, text, color="#a3a3a3"):
         self.status_label.configure(text=text, text_color=color)
- 
+
     def set_progress(self, val):
         self.progress_bar.set(val)
- 
+
     # ==================== PHASE 1: Fetching Formats ====================
     def start_fetch_formats(self):
         url = self.video_url_entry.get().strip()
@@ -203,7 +226,7 @@ class UniversalVideoDownloader(ctk.CTk):
         # Spin up daemon thread to prevent freezing the main UI
         thread = threading.Thread(target=self._fetch_formats_worker, args=(url,), daemon=True)
         thread.start()
- 
+
     def _fetch_formats_worker(self, url):
         try:
             ydl_opts = {
@@ -240,7 +263,7 @@ class UniversalVideoDownloader(ctk.CTk):
                 
         except Exception as e:
             self.after(0, lambda: self._on_fetch_failed(str(e)))
- 
+
     def _on_fetch_success(self, parsed_formats):
         self.is_fetching = False
         self.fetch_button.configure(state="normal", text="Fetch Video Formats")
@@ -254,7 +277,7 @@ class UniversalVideoDownloader(ctk.CTk):
         self.format_selector.set(dropdown_options[0])
         
         self.update_status(f"Parsed {len(parsed_formats)} formats. Video Title: '{self.video_title}'", "#4ade80")
- 
+
     def _on_fetch_failed(self, error_msg):
         self.is_fetching = False
         self.fetch_button.configure(state="normal", text="Fetch Video Formats")
@@ -262,7 +285,73 @@ class UniversalVideoDownloader(ctk.CTk):
         self.format_selector.set("Fetch formats to enable...")
         self.update_status(f"Error fetching formats: {error_msg}", "#f87171")
         messagebox.showerror("Format Extraction Failed", f"Failed to retrieve format details:\\n{error_msg}")
- 
+
+    # ==================== SUBTITLE VERIFICATION ====================
+    def start_verify_subtitle(self):
+        url = self.subtitle_url_entry.get().strip()
+        if not url:
+            messagebox.showerror("Error", "Please enter a subtitle URL first!")
+            return
+            
+        if self.is_verifying_subtitle:
+            return
+            
+        self.is_verifying_subtitle = True
+        self.verify_sub_button.configure(state="disabled", text="Verifying...")
+        self.subtitle_status_label.configure(text="Fetching & validating subtitle...", text_color="#60a5fa")
+        
+        # Run background thread
+        thread = threading.Thread(target=self._verify_subtitle_worker, args=(url,), daemon=True)
+        thread.start()
+
+    def _verify_subtitle_worker(self, url):
+        temp_subs_path = os.path.abspath("temp_subs.vtt")
+        try:
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+            response = requests.get(url, headers=headers, timeout=15)
+            
+            if response.status_code != 200:
+                raise ValueError(f"HTTP Error {response.status_code}")
+                
+            content = response.text
+            stripped_content = content.lstrip()
+            
+            # Validation check
+            is_valid = stripped_content.startswith("WEBVTT") or "-->" in stripped_content
+            
+            if is_valid:
+                # Save content immediately as temp_subs.vtt
+                with open(temp_subs_path, "w", encoding="utf-8") as sub_file:
+                    sub_file.write(content)
+                self.after(0, lambda: self._on_verify_subtitle_success())
+            else:
+                # Delete any leftover temp_subs.vtt
+                if os.path.exists(temp_subs_path):
+                    try:
+                        os.remove(temp_subs_path)
+                    except:
+                        pass
+                self.after(0, lambda: self._on_verify_subtitle_failed("Invalid subtitle format (not VTT/SRT)"))
+                
+        except Exception as e:
+            # Delete any leftover temp_subs.vtt on error
+            if os.path.exists(temp_subs_path):
+                try:
+                    os.remove(temp_subs_path)
+                except:
+                    pass
+            self.after(0, lambda: self._on_verify_subtitle_failed(str(e)))
+
+    def _on_verify_subtitle_success(self):
+        self.is_verifying_subtitle = False
+        self.verify_sub_button.configure(state="normal", text="Verify Subtitle")
+        self.subtitle_status_label.configure(text="✅ Subtitle Fetched & Validated!", text_color="#4ade80")
+
+    def _on_verify_subtitle_failed(self, error_msg):
+        self.is_verifying_subtitle = False
+        self.verify_sub_button.configure(state="normal", text="Verify Subtitle")
+        self.subtitle_status_label.configure(text="❌ Error: Invalid Subtitle Link or Format", text_color="#f87171")
+
     # ==================== PHASE 2: Downloading & Merging ====================
     def start_download(self):
         url = self.video_url_entry.get().strip()
@@ -292,7 +381,7 @@ class UniversalVideoDownloader(ctk.CTk):
         # Spin up daemon thread to prevent freezing the main UI
         thread = threading.Thread(target=self._download_worker, args=(url,), daemon=True)
         thread.start()
- 
+
     def _download_worker(self, url):
         selected_fmt = self.format_selector.get()
         subtitle_url = self.subtitle_url_entry.get().strip()
@@ -309,7 +398,7 @@ class UniversalVideoDownloader(ctk.CTk):
         else:
             out_template = "%(title)s.%(ext)s"
             final_display_name = self.video_title or "Downloaded Video"
- 
+
         # Map selected dropdown resolution back to yt-dlp queries
         format_query = 'bestvideo+bestaudio/best'
         if selected_fmt != "Best (Default)" and "p" in selected_fmt:
@@ -318,7 +407,7 @@ class UniversalVideoDownloader(ctk.CTk):
                 format_query = f"bestvideo[height<={res}]+bestaudio/best[height<={res}]"
             except:
                 pass
- 
+
         # Progress hooks for live progress bar
         def progress_hook(d):
             if d['status'] == 'downloading':
@@ -348,7 +437,7 @@ class UniversalVideoDownloader(ctk.CTk):
                 
             elif d['status'] == 'finished':
                 self.after(0, lambda: self.update_status("Video download complete. Merging streams..."))
- 
+
         ydl_opts = {
             'format': format_query,
             'outtmpl': out_template,
@@ -357,11 +446,11 @@ class UniversalVideoDownloader(ctk.CTk):
             'quiet': True,
             'no_warnings': True
         }
- 
+
         # Handle condition boundaries
         temp_subs_path = os.path.abspath("temp_subs.vtt")
         has_subtitle = False
- 
+
         try:
             # 1. First download the video using yt-dlp (Common to both A and B)
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -398,7 +487,7 @@ class UniversalVideoDownloader(ctk.CTk):
                             if os.path.exists(base + ext):
                                 final_video_path = os.path.abspath(base + ext)
                                 break
- 
+
                 # Attempt 4: Scan current directory for files starting with the base name
                 if not final_video_path:
                     prepared_filename = ydl.prepare_filename(info_dict)
@@ -411,9 +500,12 @@ class UniversalVideoDownloader(ctk.CTk):
                 # Raise descriptive exception if video is not found
                 if not final_video_path or not os.path.exists(final_video_path):
                     raise FileNotFoundError("yt-dlp completed downloading, but the final video file could not be located on disk.")
- 
-            # 2. Condition B: Subtitle URL is FILLED
-            if subtitle_url:
+
+            # 2. Subtitle Processing & Remuxing
+            has_subtitle = os.path.exists(temp_subs_path)
+            
+            # If temp_subs.vtt doesn't exist yet but the user filled in the subtitle URL field, fetch it now
+            if not has_subtitle and subtitle_url:
                 self.after(0, lambda: self.update_status("Fetching subtitle track from URL..."))
                 
                 # Download subtitle content via requests
@@ -427,20 +519,22 @@ class UniversalVideoDownloader(ctk.CTk):
                     sub_file.write(sub_content)
                 has_subtitle = True
                 
-                self.after(0, lambda: self.update_status("Muxing video & subtitle with FFmpeg..."))
+            if has_subtitle:
+                self.after(0, lambda: self.update_status("Remuxing video & subtitle with FFmpeg..."))
                 
                 # Mux video and subtitles into single final media container using absolute paths
                 name_no_ext, _ = os.path.splitext(final_video_path)
                 muxed_video_path = f"{name_no_ext}_muxed.mkv"
                 
-                # FFmpeg command to copy streams and map the subtitle track
+                # Strict FFmpeg command mapping all inputs and setting disposition
                 cmd = [
                     'ffmpeg', '-y',
                     '-i', final_video_path,
                     '-i', temp_subs_path,
                     '-c', 'copy',
-                    '-c:s', 'srt',  # soft subtitles inside MKV container
-                    '-metadata:s:s:0', 'language=eng',
+                    '-map', '0',
+                    '-map', '1',
+                    '-disposition:s:0', 'default',
                     muxed_video_path
                 ]
                 
@@ -448,19 +542,25 @@ class UniversalVideoDownloader(ctk.CTk):
                 result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
                 
                 if os.path.exists(muxed_video_path):
-                    # Remove original un-muxed file and replace with muxed version
-                    if os.path.exists(final_video_path):
-                        os.remove(final_video_path)
+                    # Remove original raw input video file
+                    if os.path.exists(final_video_path) and final_video_path != muxed_video_path:
+                        try:
+                            os.remove(final_video_path)
+                        except Exception as e:
+                            print(f"Error removing raw input video: {e}")
                     
-                    final_output_path = f"{name_no_ext}.mkv"
-                    if os.path.exists(final_output_path):
-                        os.remove(final_output_path)
-                    os.rename(muxed_video_path, final_output_path)
-                    final_video_path = final_output_path
-                    self.after(0, lambda: self.update_status("Subtitle track embedded successfully.", "#4ade80"))
+                    # Remove original raw input subtitle file (temp_subs.vtt)
+                    if os.path.exists(temp_subs_path):
+                        try:
+                            os.remove(temp_subs_path)
+                        except Exception as e:
+                            print(f"Error removing raw input subtitle: {e}")
+                            
+                    final_video_path = muxed_video_path
+                    self.after(0, lambda: self.update_status("Subtitle track remuxed successfully.", "#4ade80"))
                 else:
                     raise Exception("FFmpeg execution finished, but the muxed output file was not generated.")
- 
+
             self.after(0, lambda: self._on_download_success(final_video_path))
             
         except Exception as e:
@@ -473,20 +573,20 @@ class UniversalVideoDownloader(ctk.CTk):
                     os.remove(temp_subs_path)
                 except Exception as clean_err:
                     print(f"Error cleaning up temp subtitle file: {clean_err}")
- 
+
     def _on_download_success(self, filepath):
         self.is_downloading = False
         self.download_button.configure(state="normal", text="Download")
         self.set_progress(1.0)
         self.update_status(f"Download complete! Saved as '{os.path.basename(filepath)}'", "#4ade80")
         messagebox.showinfo("Success", f"Video download and pipeline process completed successfully!\\nSaved to: {os.path.abspath(filepath)}")
- 
+
     def _on_download_failed(self, error_msg):
         self.is_downloading = False
         self.download_button.configure(state="normal", text="Download")
         self.update_status(f"Error: {error_msg}", "#f87171")
         messagebox.showerror("Download Failed", f"An error occurred during download or post-processing:\\n{error_msg}")
- 
+
 if __name__ == "__main__":
     app = UniversalVideoDownloader()
     app.mainloop()
@@ -562,6 +662,10 @@ export default function App() {
   const [isFormatMenuEnabled, setIsFormatMenuEnabled] = useState<boolean>(false);
   
   const [subtitleUrlSim, setSubtitleUrlSim] = useState<string>('');
+  const [isVerifyingSubSim, setIsVerifyingSubSim] = useState<boolean>(false);
+  const [subtitleStatusLabelSim, setSubtitleStatusLabelSim] = useState<string>("Status: Not verified (optional)");
+  const [subtitleStatusColorSim, setSubtitleStatusColorSim] = useState<string>("text-slate-400");
+  const [isSubtitleVerifiedSim, setIsSubtitleVerifiedSim] = useState<boolean>(false);
   const [customFilenameSim, setCustomFilenameSim] = useState<string>('');
   const [isDownloadingSim, setIsDownloadingSim] = useState<boolean>(false);
   const [simProgress, setSimProgress] = useState<number>(0);
@@ -617,6 +721,9 @@ export default function App() {
     setSimProgress(0);
     setSimStatusLabel("Preset loaded! Click 'Fetch Video Formats' to query available formats.");
     setSimStatusColor("text-sky-400");
+    setIsSubtitleVerifiedSim(false);
+    setSubtitleStatusLabelSim("Status: Not verified (optional)");
+    setSubtitleStatusColorSim("text-slate-400");
     addLog(`[UI] Pasted preset: ${preset.name}`);
   };
 
@@ -624,6 +731,42 @@ export default function App() {
   const addLog = (msg: string) => {
     const timestamp = new Date().toLocaleTimeString();
     setSimLogs(prev => [...prev, `[${timestamp}] ${msg}`]);
+  };
+
+  // Simulated verification handler
+  const handleSimVerifySubtitle = () => {
+    if (!subtitleUrlSim.trim()) {
+      addLog('ERROR: Subtitle URL input is empty!');
+      setSubtitleStatusLabelSim("❌ Error: Subtitle URL cannot be empty");
+      setSubtitleStatusColorSim("text-red-400");
+      return;
+    }
+
+    setIsVerifyingSubSim(true);
+    setSubtitleStatusLabelSim("Fetching & validating subtitle...");
+    setSubtitleStatusColorSim("text-blue-400");
+    addLog(`[thread-3] Spawning subtitle verification thread...`);
+    addLog(`[thread-3] Fetching subtitle from URL: "${subtitleUrlSim}"`);
+
+    setTimeout(() => {
+      const lowerUrl = subtitleUrlSim.toLowerCase();
+      const isValid = lowerUrl.includes('vtt') || lowerUrl.includes('srt') || lowerUrl.includes('php') || lowerUrl.includes('sub');
+
+      if (isValid) {
+        setIsSubtitleVerifiedSim(true);
+        setSubtitleStatusLabelSim("✅ Subtitle Fetched & Validated!");
+        setSubtitleStatusColorSim("text-green-400");
+        addLog(`[thread-3] Validation Check: Status Code 200, WEBVTT and arrow timecode check passed.`);
+        addLog(`[thread-3] Saved validated subtitle locally as "temp_subs.vtt"`);
+        addLog(`[thread-3] Verification successful.`);
+      } else {
+        setIsSubtitleVerifiedSim(false);
+        setSubtitleStatusLabelSim("❌ Error: Invalid Subtitle Link or Format");
+        setSubtitleStatusColorSim("text-red-400");
+        addLog(`[thread-3] ERROR: Verification failed. Invalid content format or network error.`);
+      }
+      setIsVerifyingSubSim(false);
+    }, 1200);
   };
 
   // Run simulated fetch metadata info (Phase 1)
@@ -707,11 +850,34 @@ export default function App() {
         
         addLog(`[thread-2] Video track downloaded: 100.0% done.`);
         
-        if (hasSubtitleFilled) {
-          // Condition B: Video + Subtitle
+        if (isSubtitleVerifiedSim) {
+          // Pre-verified subtitle
+          setSimStatusLabel("Muxing video & subtitle with FFmpeg...");
+          setSimStatusColor("text-amber-400");
+          addLog(`[thread-2] Found pre-verified "temp_subs.vtt" file. Skipping HTTP requests download step.`);
+          addLog(`[thread-2] Invoking FFmpeg subprocess command...`);
+          
+          const tempVideoFile = `${finalName.toLowerCase().replace(/\s+/g, '_')}.mp4`;
+          const finalMuxedFile = `${finalName.toLowerCase().replace(/\s+/g, '_')}_muxed.mkv`;
+          addLog(`[ffmpeg] Executing: ffmpeg -y -i ${tempVideoFile} -i temp_subs.vtt -c copy -map 0 -map 1 -disposition:s:0 default ${finalMuxedFile}`);
+          
+          setTimeout(() => {
+            addLog(`[ffmpeg] Muxing complete. Generated final package: "${finalMuxedFile}"`);
+            addLog(`[thread-2] Removing temporary file: "temp_subs.vtt" removed.`);
+            addLog(`[thread-2] Removing un-muxed raw video: "${tempVideoFile}" removed.`);
+            
+            setSimStatusLabel(`Download complete! Saved as '${finalMuxedFile}'`);
+            setSimStatusColor("text-green-400");
+            setIsDownloadingSim(false);
+            addLog(`[system] SUCCESS: Download & soft-embedding pipeline executed flawlessly.`);
+            alert(`Success! Saved with embedded subtitles as: ${finalMuxedFile}`);
+          }, 1200);
+          
+        } else if (hasSubtitleFilled) {
+          // Subtitle not verified, but URL filled (fetch dynamically as fallback)
           setSimStatusLabel("Fetching subtitle track from URL...");
           setSimStatusColor("text-amber-400");
-          addLog(`[thread-2] [Condition B] Subtitle URL is FILLED: "${subtitleUrlSim}"`);
+          addLog(`[thread-2] Subtitle URL is FILLED: "${subtitleUrlSim}" but not pre-verified.`);
           addLog(`[thread-2] Initiating HTTP GET request via requests library...`);
           
           setTimeout(() => {
@@ -721,10 +887,9 @@ export default function App() {
             setSimStatusColor("text-amber-400");
             addLog(`[thread-2] Invoking FFmpeg subprocess command...`);
             
-            const subCodec = 'srt';
             const tempVideoFile = `${finalName.toLowerCase().replace(/\s+/g, '_')}.mp4`;
-            const finalMuxedFile = `${finalName.toLowerCase().replace(/\s+/g, '_')}.mkv`;
-            addLog(`[ffmpeg] Executing: ffmpeg -y -i ${tempVideoFile} -i temp_subs.vtt -c copy -c:s ${subCodec} -metadata:s:s:0 language=eng ${finalMuxedFile}`);
+            const finalMuxedFile = `${finalName.toLowerCase().replace(/\s+/g, '_')}_muxed.mkv`;
+            addLog(`[ffmpeg] Executing: ffmpeg -y -i ${tempVideoFile} -i temp_subs.vtt -c copy -map 0 -map 1 -disposition:s:0 default ${finalMuxedFile}`);
             
             setTimeout(() => {
               addLog(`[ffmpeg] Muxing complete. Generated final package: "${finalMuxedFile}"`);
@@ -742,7 +907,6 @@ export default function App() {
           
         } else {
           // Condition A: Video Only
-          // Just merging video/audio formats
           setSimStatusLabel("Video download complete. Merging streams...");
           addLog(`[thread-2] [Condition A] Subtitle URL is EMPTY. Skipping subtitle process.`);
           addLog(`[thread-2] yt-dlp merging audio and video tracks into unified container...`);
@@ -960,15 +1124,33 @@ export default function App() {
                     {/* 4. Subtitle URL Input Area */}
                     <div className="flex flex-col gap-1">
                       <label className="text-xs font-bold text-slate-300">Subtitle URL (Optional - handles dynamic PHP/vtt/srt):</label>
-                      <input 
-                        id="sim-subtitle-input"
-                        type="text"
-                        placeholder="e.g., http://example.com/subtitle.php?pid=123 or standard VTT/SRT URL"
-                        value={subtitleUrlSim}
-                        onChange={(e) => setSubtitleUrlSim(e.target.value)}
-                        disabled={isDownloadingSim}
-                        className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-1.5 text-xs text-slate-300 font-mono focus:outline-none focus:border-blue-500 disabled:opacity-50 placeholder:text-slate-600"
-                      />
+                      <div className="flex items-center gap-2">
+                        <input 
+                          id="sim-subtitle-input"
+                          type="text"
+                          placeholder="e.g., http://example.com/subtitle.php?pid=123 or standard VTT/SRT URL"
+                          value={subtitleUrlSim}
+                          onChange={(e) => {
+                            setSubtitleUrlSim(e.target.value);
+                            setIsSubtitleVerifiedSim(false);
+                            setSubtitleStatusLabelSim("Status: Not verified (optional)");
+                            setSubtitleStatusColorSim("text-slate-400");
+                          }}
+                          disabled={isDownloadingSim || isVerifyingSubSim}
+                          className="flex-1 bg-slate-950 border border-slate-800 rounded px-3 py-1.5 text-xs text-slate-300 font-mono focus:outline-none focus:border-blue-500 disabled:opacity-50 placeholder:text-slate-600"
+                        />
+                        <button
+                          id="sim-verify-sub-btn"
+                          onClick={handleSimVerifySubtitle}
+                          disabled={isDownloadingSim || isVerifyingSubSim}
+                          className="bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 text-white font-bold text-xs py-1.5 px-3 rounded transition-colors duration-150 disabled:text-slate-500 cursor-pointer"
+                        >
+                          {isVerifyingSubSim ? "Verifying..." : "Verify Subtitle"}
+                        </button>
+                      </div>
+                      <p className={`text-[11px] font-medium italic mt-0.5 ${subtitleStatusColorSim}`}>
+                        {subtitleStatusLabelSim}
+                      </p>
                     </div>
 
                     {/* 5. Custom Filename Input Area */}

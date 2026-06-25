@@ -34,12 +34,13 @@ class UniversalVideoDownloader(ctk.CTk):
         
         # Window configuration
         self.title("Universal Video Downloader")
-        self.geometry("640x520")
+        self.geometry("640x580")
         self.resizable(False, False)
         
         # State variables
         self.is_fetching = False
         self.is_downloading = False
+        self.is_verifying_subtitle = False
         self.fetched_formats_info = []
         self.video_title = ""
         
@@ -104,12 +105,34 @@ class UniversalVideoDownloader(ctk.CTk):
         )
         self.sub_label.pack(anchor="w", padx=30, pady=(10, 2))
         
+        # Horizontal frame for subtitle entry and fetch/verify button
+        self.sub_input_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        self.sub_input_frame.pack(fill="x", padx=30, pady=(0, 2))
+        
         self.subtitle_url_entry = ctk.CTkEntry(
-            self.main_frame,
+            self.sub_input_frame,
             placeholder_text="e.g., http://example.com/subtitle.php?pid=123 or standard VTT/SRT URL",
-            width=500
+            width=360
         )
-        self.subtitle_url_entry.pack(padx=30, pady=(0, 10))
+        self.subtitle_url_entry.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        
+        self.verify_sub_button = ctk.CTkButton(
+            self.sub_input_frame,
+            text="Verify Subtitle",
+            command=self.start_verify_subtitle,
+            font=ctk.CTkFont(size=11, weight="bold"),
+            width=120
+        )
+        self.verify_sub_button.pack(side="right")
+        
+        # Subtitle verification status label
+        self.subtitle_status_label = ctk.CTkLabel(
+            self.main_frame,
+            text="Status: Not verified (optional)",
+            font=ctk.CTkFont(size=11, slant="italic"),
+            text_color="#a3a3a3"
+        )
+        self.subtitle_status_label.pack(anchor="w", padx=30, pady=(0, 10))
         
         # 5. Custom Filename Input Area (Optional)
         self.filename_label = ctk.CTkLabel(
@@ -236,6 +259,72 @@ class UniversalVideoDownloader(ctk.CTk):
         self.format_selector.set("Fetch formats to enable...")
         self.update_status(f"Error fetching formats: {error_msg}", "#f87171")
         messagebox.showerror("Format Extraction Failed", f"Failed to retrieve format details:\n{error_msg}")
+
+    # ==================== SUBTITLE VERIFICATION ====================
+    def start_verify_subtitle(self):
+        url = self.subtitle_url_entry.get().strip()
+        if not url:
+            messagebox.showerror("Error", "Please enter a subtitle URL first!")
+            return
+            
+        if self.is_verifying_subtitle:
+            return
+            
+        self.is_verifying_subtitle = True
+        self.verify_sub_button.configure(state="disabled", text="Verifying...")
+        self.subtitle_status_label.configure(text="Fetching & validating subtitle...", text_color="#60a5fa")
+        
+        # Run background thread
+        thread = threading.Thread(target=self._verify_subtitle_worker, args=(url,), daemon=True)
+        thread.start()
+
+    def _verify_subtitle_worker(self, url):
+        temp_subs_path = os.path.abspath("temp_subs.vtt")
+        try:
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+            response = requests.get(url, headers=headers, timeout=15)
+            
+            if response.status_code != 200:
+                raise ValueError(f"HTTP Error {response.status_code}")
+                
+            content = response.text
+            stripped_content = content.lstrip()
+            
+            # Validation check
+            is_valid = stripped_content.startswith("WEBVTT") or "-->" in stripped_content
+            
+            if is_valid:
+                # Save content immediately as temp_subs.vtt
+                with open(temp_subs_path, "w", encoding="utf-8") as sub_file:
+                    sub_file.write(content)
+                self.after(0, lambda: self._on_verify_subtitle_success())
+            else:
+                # Delete any leftover temp_subs.vtt
+                if os.path.exists(temp_subs_path):
+                    try:
+                        os.remove(temp_subs_path)
+                    except:
+                        pass
+                self.after(0, lambda: self._on_verify_subtitle_failed("Invalid subtitle format (not VTT/SRT)"))
+                
+        except Exception as e:
+            # Delete any leftover temp_subs.vtt on error
+            if os.path.exists(temp_subs_path):
+                try:
+                    os.remove(temp_subs_path)
+                except:
+                    pass
+            self.after(0, lambda: self._on_verify_subtitle_failed(str(e)))
+
+    def _on_verify_subtitle_success(self):
+        self.is_verifying_subtitle = False
+        self.verify_sub_button.configure(state="normal", text="Verify Subtitle")
+        self.subtitle_status_label.configure(text="✅ Subtitle Fetched & Validated!", text_color="#4ade80")
+
+    def _on_verify_subtitle_failed(self, error_msg):
+        self.is_verifying_subtitle = False
+        self.verify_sub_button.configure(state="normal", text="Verify Subtitle")
+        self.subtitle_status_label.configure(text="❌ Error: Invalid Subtitle Link or Format", text_color="#f87171")
 
     # ==================== PHASE 2: Downloading & Merging ====================
     def start_download(self):
@@ -386,8 +475,11 @@ class UniversalVideoDownloader(ctk.CTk):
                 if not final_video_path or not os.path.exists(final_video_path):
                     raise FileNotFoundError("yt-dlp completed downloading, but the final video file could not be located on disk.")
 
-            # 2. Condition B: Subtitle URL is FILLED
-            if subtitle_url:
+            # 2. Subtitle Processing & Remuxing
+            has_subtitle = os.path.exists(temp_subs_path)
+            
+            # If temp_subs.vtt doesn't exist yet but the user filled in the subtitle URL field, fetch it now
+            if not has_subtitle and subtitle_url:
                 self.after(0, lambda: self.update_status("Fetching subtitle track from URL..."))
                 
                 # Download subtitle content via requests
@@ -401,20 +493,22 @@ class UniversalVideoDownloader(ctk.CTk):
                     sub_file.write(sub_content)
                 has_subtitle = True
                 
-                self.after(0, lambda: self.update_status("Muxing video & subtitle with FFmpeg..."))
+            if has_subtitle:
+                self.after(0, lambda: self.update_status("Remuxing video & subtitle with FFmpeg..."))
                 
                 # Mux video and subtitles into single final media container using absolute paths
                 name_no_ext, _ = os.path.splitext(final_video_path)
                 muxed_video_path = f"{name_no_ext}_muxed.mkv"
                 
-                # FFmpeg command to copy streams and map the subtitle track
+                # Strict FFmpeg command mapping all inputs and setting disposition
                 cmd = [
                     'ffmpeg', '-y',
                     '-i', final_video_path,
                     '-i', temp_subs_path,
                     '-c', 'copy',
-                    '-c:s', 'srt',  # soft subtitles inside MKV container
-                    '-metadata:s:s:0', 'language=eng',
+                    '-map', '0',
+                    '-map', '1',
+                    '-disposition:s:0', 'default',
                     muxed_video_path
                 ]
                 
@@ -422,16 +516,22 @@ class UniversalVideoDownloader(ctk.CTk):
                 result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
                 
                 if os.path.exists(muxed_video_path):
-                    # Remove original un-muxed file and replace with muxed version
-                    if os.path.exists(final_video_path):
-                        os.remove(final_video_path)
+                    # Remove original raw input video file
+                    if os.path.exists(final_video_path) and final_video_path != muxed_video_path:
+                        try:
+                            os.remove(final_video_path)
+                        except Exception as e:
+                            print(f"Error removing raw input video: {e}")
                     
-                    final_output_path = f"{name_no_ext}.mkv"
-                    if os.path.exists(final_output_path):
-                        os.remove(final_output_path)
-                    os.rename(muxed_video_path, final_output_path)
-                    final_video_path = final_output_path
-                    self.after(0, lambda: self.update_status("Subtitle track embedded successfully.", "#4ade80"))
+                    # Remove original raw input subtitle file (temp_subs.vtt)
+                    if os.path.exists(temp_subs_path):
+                        try:
+                            os.remove(temp_subs_path)
+                        except Exception as e:
+                            print(f"Error removing raw input subtitle: {e}")
+                            
+                    final_video_path = muxed_video_path
+                    self.after(0, lambda: self.update_status("Subtitle track remuxed successfully.", "#4ade80"))
                 else:
                     raise Exception("FFmpeg execution finished, but the muxed output file was not generated.")
 
