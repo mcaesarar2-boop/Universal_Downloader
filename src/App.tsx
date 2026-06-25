@@ -41,6 +41,7 @@ Note:
 
 import os
 import sys
+import shutil
 import threading
 import subprocess
 import requests
@@ -177,14 +178,14 @@ class UniversalVideoDownloader(ctk.CTk):
             wraplength=520
         )
         self.status_label.pack(padx=30, pady=(0, 15))
-
+ 
     # Safe helpers to update UI states from background threads
     def update_status(self, text, color="#a3a3a3"):
         self.status_label.configure(text=text, text_color=color)
-
+ 
     def set_progress(self, val):
         self.progress_bar.set(val)
-
+ 
     # ==================== PHASE 1: Fetching Formats ====================
     def start_fetch_formats(self):
         url = self.video_url_entry.get().strip()
@@ -202,7 +203,7 @@ class UniversalVideoDownloader(ctk.CTk):
         # Spin up daemon thread to prevent freezing the main UI
         thread = threading.Thread(target=self._fetch_formats_worker, args=(url,), daemon=True)
         thread.start()
-
+ 
     def _fetch_formats_worker(self, url):
         try:
             ydl_opts = {
@@ -239,7 +240,7 @@ class UniversalVideoDownloader(ctk.CTk):
                 
         except Exception as e:
             self.after(0, lambda: self._on_fetch_failed(str(e)))
-
+ 
     def _on_fetch_success(self, parsed_formats):
         self.is_fetching = False
         self.fetch_button.configure(state="normal", text="Fetch Video Formats")
@@ -253,7 +254,7 @@ class UniversalVideoDownloader(ctk.CTk):
         self.format_selector.set(dropdown_options[0])
         
         self.update_status(f"Parsed {len(parsed_formats)} formats. Video Title: '{self.video_title}'", "#4ade80")
-
+ 
     def _on_fetch_failed(self, error_msg):
         self.is_fetching = False
         self.fetch_button.configure(state="normal", text="Fetch Video Formats")
@@ -261,7 +262,7 @@ class UniversalVideoDownloader(ctk.CTk):
         self.format_selector.set("Fetch formats to enable...")
         self.update_status(f"Error fetching formats: {error_msg}", "#f87171")
         messagebox.showerror("Format Extraction Failed", f"Failed to retrieve format details:\\n{error_msg}")
-
+ 
     # ==================== PHASE 2: Downloading & Merging ====================
     def start_download(self):
         url = self.video_url_entry.get().strip()
@@ -269,6 +270,17 @@ class UniversalVideoDownloader(ctk.CTk):
             messagebox.showerror("Error", "Please enter a valid video URL first!")
             return
             
+        # Check if FFmpeg is installed and accessible
+        if not shutil.which('ffmpeg'):
+            self.update_status("Error: FFmpeg is not installed or not in PATH.", "#f87171")
+            messagebox.showerror(
+                "FFmpeg Missing", 
+                "FFmpeg is not installed or not found on the system PATH.\\n\\n"
+                "To download high-quality streams and merge subtitles, FFmpeg is required.\\n"
+                "Please install FFmpeg and ensure it is added to your environment variables."
+            )
+            return
+
         if self.is_downloading or self.is_fetching:
             return
             
@@ -280,7 +292,7 @@ class UniversalVideoDownloader(ctk.CTk):
         # Spin up daemon thread to prevent freezing the main UI
         thread = threading.Thread(target=self._download_worker, args=(url,), daemon=True)
         thread.start()
-
+ 
     def _download_worker(self, url):
         selected_fmt = self.format_selector.get()
         subtitle_url = self.subtitle_url_entry.get().strip()
@@ -297,7 +309,7 @@ class UniversalVideoDownloader(ctk.CTk):
         else:
             out_template = "%(title)s.%(ext)s"
             final_display_name = self.video_title or "Downloaded Video"
-
+ 
         # Map selected dropdown resolution back to yt-dlp queries
         format_query = 'bestvideo+bestaudio/best'
         if selected_fmt != "Best (Default)" and "p" in selected_fmt:
@@ -306,7 +318,7 @@ class UniversalVideoDownloader(ctk.CTk):
                 format_query = f"bestvideo[height<={res}]+bestaudio/best[height<={res}]"
             except:
                 pass
-
+ 
         # Progress hooks for live progress bar
         def progress_hook(d):
             if d['status'] == 'downloading':
@@ -336,7 +348,7 @@ class UniversalVideoDownloader(ctk.CTk):
                 
             elif d['status'] == 'finished':
                 self.after(0, lambda: self.update_status("Video download complete. Merging streams..."))
-
+ 
         ydl_opts = {
             'format': format_query,
             'outtmpl': out_template,
@@ -345,36 +357,67 @@ class UniversalVideoDownloader(ctk.CTk):
             'quiet': True,
             'no_warnings': True
         }
-
+ 
         # Handle condition boundaries
-        temp_subs_path = "temp_subs.vtt"
+        temp_subs_path = os.path.abspath("temp_subs.vtt")
         has_subtitle = False
-
+ 
         try:
             # 1. First download the video using yt-dlp (Common to both A and B)
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info_dict = ydl.extract_info(url, download=True)
-                downloaded_file = ydl.prepare_filename(info_dict)
                 
-                # Check for merged output format extensions
-                base, _ = os.path.splitext(downloaded_file)
-                final_video_path = f"{base}.mp4"
-                if not os.path.exists(final_video_path):
-                    if os.path.exists(downloaded_file):
-                        final_video_path = downloaded_file
+                # --- Dynamic File Tracking ---
+                final_video_path = None
+                
+                # Attempt 1: get from requested_downloads list
+                requested_downloads = info_dict.get('requested_downloads', [])
+                if requested_downloads and isinstance(requested_downloads, list):
+                    first_dl = requested_downloads[0]
+                    if isinstance(first_dl, dict) and first_dl.get('filepath'):
+                        candidate = first_dl['filepath']
+                        if os.path.exists(candidate):
+                            final_video_path = os.path.abspath(candidate)
+                
+                # Attempt 2: get from '_filename' key
+                if not final_video_path:
+                    candidate = info_dict.get('_filename')
+                    if candidate and os.path.exists(candidate):
+                        final_video_path = os.path.abspath(candidate)
+                        
+                # Attempt 3: get from prepare_filename
+                if not final_video_path:
+                    prepared_filename = ydl.prepare_filename(info_dict)
+                    if os.path.exists(prepared_filename):
+                        final_video_path = os.path.abspath(prepared_filename)
                     else:
-                        # Fallback list search for matching downloaded chunks
-                        for f in os.listdir('.'):
-                            if f.startswith(os.path.basename(base)) and f != temp_subs_path:
-                                final_video_path = f
+                        # Sometimes yt-dlp automatically merges streams or converts formats, changing the extension.
+                        # Let's check common media extensions with the same base name.
+                        base, _ = os.path.splitext(prepared_filename)
+                        for ext in ['.mp4', '.mkv', '.webm', '.flv', '.avi', '.ts']:
+                            if os.path.exists(base + ext):
+                                final_video_path = os.path.abspath(base + ext)
                                 break
-
+ 
+                # Attempt 4: Scan current directory for files starting with the base name
+                if not final_video_path:
+                    prepared_filename = ydl.prepare_filename(info_dict)
+                    base_name = os.path.basename(os.path.splitext(prepared_filename)[0])
+                    for f in os.listdir('.'):
+                        if f.startswith(base_name) and f != "temp_subs.vtt":
+                            final_video_path = os.path.abspath(f)
+                            break
+                
+                # Raise descriptive exception if video is not found
+                if not final_video_path or not os.path.exists(final_video_path):
+                    raise FileNotFoundError("yt-dlp completed downloading, but the final video file could not be located on disk.")
+ 
             # 2. Condition B: Subtitle URL is FILLED
             if subtitle_url:
                 self.after(0, lambda: self.update_status("Fetching subtitle track from URL..."))
                 
                 # Download subtitle content via requests
-                headers = {'User-Agent': 'Mozilla/5.0'}
+                headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
                 response = requests.get(subtitle_url, headers=headers, timeout=15)
                 response.raise_for_status()
                 sub_content = response.text
@@ -386,8 +429,7 @@ class UniversalVideoDownloader(ctk.CTk):
                 
                 self.after(0, lambda: self.update_status("Muxing video & subtitle with FFmpeg..."))
                 
-                # Mux video and subtitles into single final media container
-                # Output as .mkv by default to preserve maximum metadata and support srt/vtt embedding flawlessly
+                # Mux video and subtitles into single final media container using absolute paths
                 name_no_ext, _ = os.path.splitext(final_video_path)
                 muxed_video_path = f"{name_no_ext}_muxed.mkv"
                 
@@ -397,12 +439,12 @@ class UniversalVideoDownloader(ctk.CTk):
                     '-i', final_video_path,
                     '-i', temp_subs_path,
                     '-c', 'copy',
-                    '-c:s', 'srt',  # soft subtitles inside MKV
+                    '-c:s', 'srt',  # soft subtitles inside MKV container
                     '-metadata:s:s:0', 'language=eng',
                     muxed_video_path
                 ]
                 
-                # Execute FFmpeg subprocess
+                # Execute FFmpeg subprocess safely using absolute file paths
                 result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
                 
                 if os.path.exists(muxed_video_path):
@@ -417,8 +459,8 @@ class UniversalVideoDownloader(ctk.CTk):
                     final_video_path = final_output_path
                     self.after(0, lambda: self.update_status("Subtitle track embedded successfully.", "#4ade80"))
                 else:
-                    raise Exception("FFmpeg executed but muxed file was not generated.")
-
+                    raise Exception("FFmpeg execution finished, but the muxed output file was not generated.")
+ 
             self.after(0, lambda: self._on_download_success(final_video_path))
             
         except Exception as e:
@@ -431,20 +473,20 @@ class UniversalVideoDownloader(ctk.CTk):
                     os.remove(temp_subs_path)
                 except Exception as clean_err:
                     print(f"Error cleaning up temp subtitle file: {clean_err}")
-
+ 
     def _on_download_success(self, filepath):
         self.is_downloading = False
         self.download_button.configure(state="normal", text="Download")
         self.set_progress(1.0)
         self.update_status(f"Download complete! Saved as '{os.path.basename(filepath)}'", "#4ade80")
         messagebox.showinfo("Success", f"Video download and pipeline process completed successfully!\\nSaved to: {os.path.abspath(filepath)}")
-
+ 
     def _on_download_failed(self, error_msg):
         self.is_downloading = False
         self.download_button.configure(state="normal", text="Download")
         self.update_status(f"Error: {error_msg}", "#f87171")
         messagebox.showerror("Download Failed", f"An error occurred during download or post-processing:\\n{error_msg}")
-
+ 
 if __name__ == "__main__":
     app = UniversalVideoDownloader()
     app.mainloop()
