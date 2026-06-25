@@ -525,11 +525,13 @@ class UniversalVideoDownloader(ctk.CTk):
                     ffmpeg_subs_path = os.path.abspath(temp_subs_path).replace('\\', '/').replace(':', '\\:')
                     cmd = [
                         'ffmpeg', '-y',
+                        '-hwaccel', 'cuda',
                         '-i', final_video_path,
                         '-vf', f"subtitles='{ffmpeg_subs_path}'",
-                        '-c:v', 'libx264',
-                        '-preset', 'fast',
-                        '-crf', '23',
+                        '-c:v', 'h264_nvenc',
+                        '-preset', 'p6',
+                        '-cq', '23',
+                        '-b:v', '0',
                         '-c:a', 'copy',
                         output_video_path
                     ]

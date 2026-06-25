@@ -898,7 +898,7 @@ export default function App() {
             setSimStatusColor("text-amber-400");
             addLog(`[thread-2] Found pre-verified "temp_subs.vtt" file. Skipping HTTP requests download step.`);
             addLog(`[thread-2] Invoking FFmpeg subprocess command...`);
-            addLog(`[ffmpeg] Executing: ffmpeg -y -i ${tempVideoFile} -vf "subtitles=temp_subs.vtt" -c:v libx264 -preset fast -crf 23 -c:a copy ${finalMuxedFile}`);
+            addLog(`[ffmpeg] Executing: ffmpeg -y -hwaccel cuda -i ${tempVideoFile} -vf "subtitles=temp_subs.vtt" -c:v h264_nvenc -preset p6 -cq 23 -b:v 0 -c:a copy ${finalMuxedFile}`);
           } else {
             setSimStatusLabel("Muxing video & subtitle with FFmpeg...");
             setSimStatusColor("text-amber-400");
@@ -952,7 +952,7 @@ export default function App() {
               setSimStatusLabel("Re-encoding video with hardsubs (Burn-in)...");
               setSimStatusColor("text-amber-400");
               addLog(`[thread-2] Invoking FFmpeg subprocess command...`);
-              addLog(`[ffmpeg] Executing: ffmpeg -y -i ${tempVideoFile} -vf "subtitles=temp_subs.vtt" -c:v libx264 -preset fast -crf 23 -c:a copy ${finalMuxedFile}`);
+              addLog(`[ffmpeg] Executing: ffmpeg -y -hwaccel cuda -i ${tempVideoFile} -vf "subtitles=temp_subs.vtt" -c:v h264_nvenc -preset p6 -cq 23 -b:v 0 -c:a copy ${finalMuxedFile}`);
             } else {
               setSimStatusLabel("Muxing video & subtitle with FFmpeg...");
               setSimStatusColor("text-amber-400");
