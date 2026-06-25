@@ -198,6 +198,19 @@ class SmartVideoDownloaderApp(ctk.CTk):
             values=["No subtitles detected"]
         )
         self.subtitle_menu.grid(row=1, column=1, padx=15, pady=(0, 15), sticky="ew")
+
+        # Custom Video Name input
+        self.custom_name_label = ctk.CTkLabel(
+            self.controls_frame, 
+            text="Custom Video Name (Optional):", 
+            font=ctk.CTkFont(weight="bold")
+        )
+        self.custom_name_label.grid(row=2, column=0, columnspan=2, padx=15, pady=(5, 5), sticky="w")
+        self.custom_name_entry = ctk.CTkEntry(
+            self.controls_frame, 
+            placeholder_text="Defaults to webpage video title"
+        )
+        self.custom_name_entry.grid(row=3, column=0, columnspan=2, padx=15, pady=(0, 15), sticky="ew")
         
         # File destination output directory
         self.dir_frame = ctk.CTkFrame(self.main_frame)
@@ -474,12 +487,56 @@ class SmartVideoDownloaderApp(ctk.CTk):
         t = threading.Thread(target=self._download_worker, daemon=True)
         t.start()
 
+    def download_dynamic_vtt(self, url, dest_path):
+        """
+        Helper function to download dynamic/raw WebVTT content and save it locally.
+        Handles dynamic endpoints returning raw text starting with WEBVTT.
+        """
+        try:
+            import requests
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+            r = requests.get(url, headers=headers, timeout=10)
+            content = r.text
+        except Exception as e:
+            # Fallback to standard urllib.request
+            try:
+                import urllib.request
+                headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+                req = urllib.request.Request(url, headers=headers)
+                with urllib.request.urlopen(req, timeout=10) as response:
+                    content = response.read().decode('utf-8', errors='ignore')
+            except Exception as inner_e:
+                self.after(0, lambda: self.write_log(f"Error fetching dynamic subtitle: {inner_e}"))
+                return False
+
+        # Verify if it contains WEBVTT signature
+        if "WEBVTT" in content or "vtt" in url.lower():
+            try:
+                with open(dest_path, "w", encoding="utf-8") as f:
+                    f.write(content)
+                return True
+            except Exception as write_err:
+                self.after(0, lambda: self.write_log(f"Error saving dynamic subtitle locally: {write_err}"))
+        return False
+
     def _download_worker(self):
         url = self.target_url
         selected_fmt = self.format_menu.get()
         selected_sub = self.subtitle_menu.get()
         out_dir = self.dir_entry.get().strip() or self.download_dir
         
+        # 1. Read custom video name entry and configure outtmpl option
+        custom_name = self.custom_name_entry.get().strip()
+        if custom_name:
+            # Clean invalid characters for safe file names
+            safe_name = "".join([c for c in custom_name if c.isalpha() or c.isdigit() or c in ' ._-']).strip()
+            if not safe_name:
+                safe_name = "Custom_Video"
+            outtmpl_path = os.path.join(out_dir, f"{safe_name}.%(ext)s")
+            self.after(0, lambda: self.write_log(f"Configuring custom filename: {safe_name}"))
+        else:
+            outtmpl_path = os.path.join(out_dir, "%(title)s.%(ext)s")
+
         # Format query mapper
         format_query = "bestvideo+bestaudio/best"
         if "Audio Track Only" in selected_fmt:
@@ -531,30 +588,43 @@ class SmartVideoDownloaderApp(ctk.CTk):
 
         ydl_opts = {
             'format': format_query,
-            'outtmpl': os.path.join(out_dir, "%(title)s.%(ext)s"),
+            'outtmpl': outtmpl_path,
             'logger': GUIStreamLogger(self),
             'progress_hooks': [download_progress_hook],
             'merge_output_format': 'mkv',  # MKV supports embedding subtitle streams without re-encoding
             'noplaylist': True,
         }
         
-        # If subtitles are requested, set yt-dlp options to download & embed
-        if selected_sub != "No subtitle selected":
-            # Extract actual language code from dropdown string
-            lang_code = selected_sub.split(" ")[0].strip()
+        # 2. Handling Dynamic / Scraped Subtitle URLs
+        temp_subtitle_path = os.path.join(out_dir, "temp_subtitle.vtt")
+        has_local_vtt = False
+
+        if selected_sub != "No subtitle selected" and self.fetched_info:
+            subtitles_dict = self.fetched_info.get('subtitles', {}) or {}
             
-            ydl_opts['writesubtitles'] = True
-            ydl_opts['allsubtitles'] = False
-            ydl_opts['subtitleslangs'] = [lang_code]
+            # Check if this is a scraped subtitle (dynamic link) from fallback scraper
+            if 'scraped_vtt' in subtitles_dict:
+                scraped_list = subtitles_dict['scraped_vtt']
+                for sub_item in scraped_list:
+                    sub_url = sub_item.get('url')
+                    if sub_url:
+                        self.after(0, lambda: self.write_log(f"Scraped WebVTT subtitle link identified: {sub_url}"))
+                        self.after(0, lambda: self.write_log("Fetching subtitle text from dynamic endpoint..."))
+                        if self.download_dynamic_vtt(sub_url, temp_subtitle_path):
+                            has_local_vtt = True
+                            self.after(0, lambda: self.write_log("Successfully downloaded and saved dynamic WebVTT locally."))
+                            break
             
-            # Embed soft subtitles using ffmpeg
-            ydl_opts['embedsubtitles'] = True
-            
-            # Include auto-generated subs if selected
-            if "Auto-Generated" in selected_sub:
-                ydl_opts['writeautomaticsub'] = True
-                
-            self.after(0, lambda: self.write_log(f"Subtitles enabled: [{lang_code}]. FFmpeg embedding activated."))
+            # If it's a standard/native subtitle, let yt-dlp manage embedding automatically
+            if not has_local_vtt:
+                lang_code = selected_sub.split(" ")[0].strip()
+                ydl_opts['writesubtitles'] = True
+                ydl_opts['allsubtitles'] = False
+                ydl_opts['subtitleslangs'] = [lang_code]
+                ydl_opts['embedsubtitles'] = True
+                if "Auto-Generated" in selected_sub:
+                    ydl_opts['writeautomaticsub'] = True
+                self.after(0, lambda: self.write_log(f"Subtitles enabled: [{lang_code}]. Native embedding activated."))
 
         if "Audio Track Only" in selected_fmt:
             ydl_opts['merge_output_format'] = None
@@ -565,8 +635,48 @@ class SmartVideoDownloaderApp(ctk.CTk):
             }]
 
         try:
+            # Perform yt-dlp download
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
+                info_dict = ydl.extract_info(url, download=True)
+                downloaded_file = ydl.prepare_filename(info_dict)
+                # Correct final extension post merging
+                if "Audio Track Only" not in selected_fmt:
+                    base, _ = os.path.splitext(downloaded_file)
+                    downloaded_file = base + ".mkv"
+
+            # 3. Custom FFmpeg merging of locally saved WebVTT subtitle
+            if has_local_vtt and os.path.exists(temp_subtitle_path) and os.path.exists(downloaded_file):
+                self.after(0, lambda: self.write_log("FFmpeg: Muxing locally scraped subtitle track into container..."))
+                import subprocess
+                muxed_file = downloaded_file.replace(".mkv", "_muxed.mkv")
+                
+                # FFmpeg soft muxing command
+                cmd = [
+                    'ffmpeg', '-y',
+                    '-i', downloaded_file,
+                    '-i', temp_subtitle_path,
+                    '-c', 'copy',
+                    '-c:s', 'srt',  # MKV container handles SRT subtitles seamlessly
+                    '-metadata:s:s:0', 'language=eng',
+                    muxed_file
+                ]
+                
+                try:
+                    subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+                    if os.path.exists(muxed_file):
+                        os.remove(downloaded_file)
+                        os.rename(muxed_file, downloaded_file)
+                        self.after(0, lambda: self.write_log("FFmpeg soft muxing sequence completed successfully."))
+                except Exception as ffmpeg_err:
+                    self.after(0, lambda: self.write_log(f"FFmpeg subprocess error: {ffmpeg_err}"))
+                finally:
+                    # Cleanup local temp files
+                    if os.path.exists(temp_subtitle_path):
+                        try:
+                            os.remove(temp_subtitle_path)
+                        except:
+                            pass
+
             self.after(0, self._on_download_complete)
         except Exception as e:
             self.after(0, lambda: self._on_download_failed(str(e)))
