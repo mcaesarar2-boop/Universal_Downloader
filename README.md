@@ -58,29 +58,41 @@ You can run this project in two different modes depending on your preference.
 #### Option A: Web App Mode (React + Flask)
 To put the new full-stack architecture into action, you need to start both the engine and the interface.
 
-1. **Start the API Backend Server:** Open a terminal and run your local Python bridge:
-   ```bash
-   python app.py
-   ```
-   *(This will start the Flask server, usually on port 5000).*
+* **🚀 Easiest Method (Windows Shortcut):**
+  Just double-click **`Run_Web.bat`** in the project folder. This automatically verifies your Python & Node.js environment, and spins up both the Flask backend server and Vite frontend client in separate terminal windows simultaneously!
 
-2. **Start the React Web GUI:** Open a second terminal window and boot up your web client:
-   ```bash
-   npm run dev
-   ```
-   *(Note: For the shared development sandbox, the frontend runs on port 3000).*
+* **💻 Manual Alternative (Cross-Platform Fallback):**
+  If you are on Mac/Linux or prefer manual controls, open two separate terminal windows and run:
+  
+  **Terminal 1 (Backend API):**
+  ```bash
+  python app.py
+  ```
+  *(Starts the Flask server listening on port 5000)*
 
-3. **Trigger Real Downloads:**
-   * Open your browser to the local web interface (e.g., `http://localhost:3000`).
-   * Switch the **API Connection Mode** toggle at the top of the UI from **🔌 Simulator** to **⚡ Live API Server**.
-   * Paste a stream URL, click **Fetch Video Formats**, select your subtitles and target bitrate, and hit **Download**!
+  **Terminal 2 (Frontend React):**
+  ```bash
+  npm run dev
+  ```
+  *(Note: For the shared development sandbox, the frontend runs on port 3000)*
+
+* **🎯 Triggering Downloads:**
+  1. Open your browser to the local web interface (e.g., `http://localhost:3000`).
+  2. Switch the **API Connection Mode** toggle at the top of the UI from **🔌 Simulator** to **⚡ Live API Server**.
+  3. Paste a stream URL, click **Fetch Video Formats**, select your subtitles and target bitrate, and hit **Download**!
 
 #### Option B: Desktop GUI Mode (Standalone)
-If you prefer not to spin up the web server, you can use the standalone Python desktop application. Run this command in your terminal:
-```bash
-python downloader.py
-```
-*(This launches the CustomTkinter dashboard, integrating yt-dlp and FFmpeg directly without needing a browser).*
+If you prefer not to spin up the web server, you can use the standalone Python desktop application.
+
+* **🚀 Easiest Method (Windows Shortcut):**
+  Just double-click **`Run_Desktop.bat`** in the project folder to launch the standalone desktop GUI instantly.
+
+* **💻 Manual Alternative (Cross-Platform Fallback):**
+  Open your terminal and execute:
+  ```bash
+  python downloader.py
+  ```
+  *(This launches the CustomTkinter dashboard, integrating yt-dlp and FFmpeg directly without needing a browser).*
 
 ---
 
@@ -136,26 +148,38 @@ Anda dapat menjalankan proyek ini dalam dua mode berbeda sesuai dengan preferens
 #### Opsi A: Mode Aplikasi Web (React + Flask)
 Untuk menggunakan arsitektur full-stack baru ini, Anda perlu menjalankan mesin backend dan antarmuka frontend secara bersamaan.
 
-1. **Jalankan Server API Backend:** Buka terminal baru dan jalankan jembatan Python lokal Anda:
-   ```bash
-   python app.py
-   ```
-   *(Ini akan memulai server Flask, biasanya pada port 5000).*
+* **🚀 Metode Termudah (Shortcut Windows):**
+  Cukup klik dua kali file **`Run_Web.bat`** di dalam folder proyek. File ini akan secara otomatis memeriksa lingkungan Python & Node.js Anda, lalu membuka server backend Flask dan klien frontend React secara bersamaan dalam dua jendela Command Prompt terpisah!
 
-2. **Jalankan React Web GUI:** Buka jendela terminal kedua dan jalankan klien web Anda:
-   ```bash
-   npm run dev
-   ```
-   *(Catatan: Untuk lingkungan pengembangan sandbox, frontend berjalan pada port 3000).*
+* **💻 Metode Alternatif Manual (Pencadangan Lintas Platform):**
+  Jika Anda menggunakan macOS/Linux atau ingin menjalankannya secara manual, buka dua jendela terminal baru dan jalankan:
+  
+  **Terminal 1 (Backend API):**
+  ```bash
+  python app.py
+  ```
+  *(Memulai server Flask pada port 5000)*
 
-3. **Mulai Mengunduh Video:**
-   * Buka browser Anda dan akses antarmuka web lokal (misalnya, `http://localhost:3000`).
-   * Ubah tombol **API Connection Mode** di bagian atas UI dari **🔌 Simulator** ke **⚡ Live API Server**.
-   * Tempelkan URL video, klik **Fetch Video Formats**, pilih file subtitle dan target bitrate Anda, lalu klik tombol **Download**!
+  **Terminal 2 (Frontend React):**
+  ```bash
+  npm run dev
+  ```
+  *(Catatan: Untuk lingkungan pengembangan sandbox, frontend berjalan pada port 3000)*
+
+* **🎯 Mulai Mengunduh Video:**
+  1. Buka browser Anda dan akses antarmuka web lokal (misalnya, `http://localhost:3000`).
+  2. Ubah tombol **API Connection Mode** di bagian atas UI dari **🔌 Simulator** ke **⚡ Live API Server**.
+  3. Tempelkan URL video, klik **Fetch Video Formats**, pilih file subtitle dan target bitrate Anda, lalu klik tombol **Download**!
 
 #### Opsi B: Mode Desktop GUI (Mandiri)
-Jika Anda tidak ingin menjalankan server web, Anda dapat menggunakan aplikasi desktop Python mandiri secara langsung. Jalankan perintah berikut di terminal Anda:
-```bash
-python downloader.py
-```
-*(Perintah ini akan membuka dasbor CustomTkinter yang mengintegrasikan yt-dlp dan FFmpeg secara langsung tanpa memerlukan browser).*
+Jika Anda tidak ingin menjalankan server web, Anda dapat menggunakan aplikasi desktop Python mandiri secara langsung.
+
+* **🚀 Metode Termudah (Shortcut Windows):**
+  Cukup klik dua kali file **`Run_Desktop.bat`** di dalam folder proyek untuk langsung memicu dasbor CustomTkinter mandiri secara cepat.
+
+* **💻 Metode Alternatif Manual (Pencadangan Lintas Platform):**
+  Buka jendela terminal baru Anda dan jalankan:
+  ```bash
+  python downloader.py
+  ```
+  *(Perintah ini akan membuka dasbor CustomTkinter yang mengintegrasikan yt-dlp dan FFmpeg secara langsung tanpa memerlukan browser).*
