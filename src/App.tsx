@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Download, 
-  Folder, 
   Play, 
   Check, 
   Copy, 
@@ -9,599 +8,315 @@ import {
   Settings, 
   Layers, 
   AlertTriangle, 
-  ExternalLink, 
   Cpu, 
   Video, 
-  Music, 
   Globe, 
   HelpCircle, 
   RefreshCw, 
   FileCode, 
-  Menu, 
-  ChevronRight, 
+  Laptop, 
+  CheckCircle, 
   Info,
-  Laptop,
-  CheckCircle,
-  XCircle,
-  Code
+  Code,
+  FileText
 } from 'lucide-react';
 
 // Live CustomTkinter code that gets updated dynamically based on user choices
-const generatePythonCode = (accentColor: string, defaultDir: string) => {
+const generatePythonCode = (accentColor: string) => {
   const mappedAccent = accentColor === 'dark-blue' ? 'dark-blue' : accentColor;
   return `"""
-Smart Landing Page Video Detector & Downloader
-================================================
-A modern GUI desktop application using CustomTkinter, yt-dlp, and FFmpeg.
-Analyzes landing pages, detects media formats, extracts available resolutions,
-discovers subtitles/captions, and embeds subtitles directly into the final video file.
+Universal Video Downloader GUI
+==============================
+A modern GUI desktop application using CustomTkinter, yt-dlp, requests, and FFmpeg.
+Features multi-threaded format fetching, custom filenames, dynamic subtitle downloading,
+and automatic audio/video/subtitle muxing with FFmpeg.
 
 Requirements:
-    pip install customtkinter yt-dlp
+    pip install customtkinter yt-dlp requests
 
-Note: FFmpeg must be installed and on your system PATH to merge video/audio streams
-      and soft-embed subtitles into the final .mp4/.mkv container.
+Note:
+    FFmpeg must be installed and on your system PATH to merge video formats and
+    soft-embed subtitles into the final media container (.mp4 or .mkv).
 """
 
 import os
-import re
 import sys
 import threading
+import subprocess
+import requests
 import tkinter as tk
-from tkinter import filedialog, messagebox
-import urllib.request
+from tkinter import messagebox
 import customtkinter as ctk
 import yt_dlp
 
-# Set modern look & default dark theme
+# Set modern look and dark theme
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("${mappedAccent}")
 
-class SmartVideoDownloaderApp(ctk.CTk):
+class UniversalVideoDownloader(ctk.CTk):
     def __init__(self):
         super().__init__()
         
-        # Configure window geometry
-        self.title("Smart Landing Page Video Detector")
-        self.geometry("960x720")
-        self.minimum_size = (850, 650)
-        self.minsize(850, 650)
+        # Window configuration
+        self.title("Universal Video Downloader")
+        self.geometry("640x520")
+        self.resizable(False, False)
         
-        # Grid layout (1 row, 2 columns)
-        self.grid_rowconfigure(0, weight=1)
-        self.grid_columnconfigure(1, weight=1)
-        
-        # Active state variables
-        self.fetched_info = None
-        self.target_url = ""
-        self.download_dir = r"${defaultDir}"
-        if not os.path.exists(self.download_dir):
-            self.download_dir = os.path.join(os.path.expanduser("~"), "Downloads")
-        if not os.path.exists(self.download_dir):
-            self.download_dir = os.getcwd()
-            
+        # State variables
         self.is_fetching = False
         self.is_downloading = False
+        self.fetched_formats_info = []
+        self.video_title = ""
         
-        # Build UI layout
-        self.create_sidebar()
-        self.create_main_panel()
+        # Main layout frame
+        self.main_frame = ctk.CTkFrame(self, corner_radius=15)
+        self.main_frame.pack(fill="both", expand=True, padx=20, pady=20)
         
-    def create_sidebar(self):
-        # Sidebar Frame Left
-        self.sidebar_frame = ctk.CTkFrame(self, width=240, corner_radius=0)
-        self.sidebar_frame.grid(row=0, column=0, sticky="nsew")
-        self.sidebar_frame.grid_rowconfigure(5, weight=1)
-        
-        # Header Logo
-        self.logo_label = ctk.CTkLabel(
-            self.sidebar_frame, 
-            text="Media Detector", 
-            font=ctk.CTkFont(size=20, weight="bold")
-        )
-        self.logo_label.grid(row=0, column=0, padx=20, pady=(20, 5))
-        
-        self.sub_label = ctk.CTkLabel(
-            self.sidebar_frame, 
-            text="Landing Page Scraper v2.5", 
-            font=ctk.CTkFont(size=11, slant="italic"),
-            text_color="gray"
-        )
-        self.sub_label.grid(row=1, column=0, padx=20, pady=(0, 20))
-        
-        # Theme Accent selector
-        self.theme_label = ctk.CTkLabel(self.sidebar_frame, text="Theme Color Accent:", anchor="w")
-        self.theme_label.grid(row=2, column=0, padx=20, pady=(10, 0), sticky="w")
-        self.theme_menu = ctk.CTkOptionMenu(
-            self.sidebar_frame, 
-            values=["blue", "green", "dark-blue"], 
-            command=self.change_theme_color
-        )
-        self.theme_menu.grid(row=3, column=0, padx=20, pady=10, sticky="ew")
-        self.theme_menu.set("${accentColor}")
-        
-        # Features check
-        self.feat_label = ctk.CTkLabel(
-            self.sidebar_frame,
-            text="Core Features:\\n• Landing Page Scanner\\n• Subtitle Soft-Embedding\\n• Format Muxing via FFmpeg\\n• DRM Filtering Shield",
-            font=ctk.CTkFont(size=11),
-            text_color="gray",
-            justify="left"
-        )
-        self.feat_label.grid(row=4, column=0, padx=20, pady=20, sticky="w")
-        
-        # Help Alert
-        self.ffmpeg_info = ctk.CTkLabel(
-            self.sidebar_frame, 
-            text="FFmpeg Requirement:\\nEnsure 'ffmpeg' is installed\\non system PATH to merge\\nvideo, audio, and embed\\nsubtitle tracks properly.", 
-            font=ctk.CTkFont(size=10), 
-            text_color="gray",
-            justify="left"
-        )
-        self.ffmpeg_info.grid(row=6, column=0, padx=20, pady=20, sticky="s")
-
-    def create_main_panel(self):
-        # Main Scrollable content frame
-        self.main_frame = ctk.CTkScrollableFrame(self, corner_radius=0, fg_color="transparent")
-        self.main_frame.grid(row=0, column=1, sticky="nsew", padx=15, pady=15)
-        self.main_frame.grid_columnconfigure(0, weight=1)
-        
-        # Title
-        self.title_label = ctk.CTkLabel(
-            self.main_frame, 
-            text="Smart Landing Page Video Detector", 
+        # App Title Label
+        self.title_lbl = ctk.CTkLabel(
+            self.main_frame,
+            text="Universal Video Downloader",
             font=ctk.CTkFont(size=22, weight="bold")
         )
-        self.title_label.grid(row=0, column=0, padx=10, pady=(10, 20), sticky="w")
+        self.title_lbl.pack(pady=(20, 15))
         
-        # URL Input block
-        self.url_frame = ctk.CTkFrame(self.main_frame)
-        self.url_frame.grid(row=1, column=0, padx=10, pady=10, sticky="ew")
-        self.url_frame.grid_columnconfigure(0, weight=1)
-        
+        # 1. Video URL Input Area
         self.url_label = ctk.CTkLabel(
-            self.url_frame, 
-            text="Input Landing Page URL (to detect videos & subtitles):", 
-            font=ctk.CTkFont(weight="bold")
+            self.main_frame,
+            text="Video / Stream / HLS URL:",
+            font=ctk.CTkFont(size=12, weight="bold")
         )
-        self.url_label.grid(row=0, column=0, padx=15, pady=(10, 5), sticky="w")
+        self.url_label.pack(anchor="w", padx=30, pady=(5, 2))
         
-        self.url_entry = ctk.CTkEntry(
-            self.url_frame, 
-            placeholder_text="https://example.com/landing-page-with-videos"
+        self.video_url_entry = ctk.CTkEntry(
+            self.main_frame,
+            placeholder_text="Enter video or HLS playlist URL (e.g., https://...)",
+            width=500
         )
-        self.url_entry.grid(row=1, column=0, padx=15, pady=(0, 15), sticky="ew")
+        self.video_url_entry.pack(padx=30, pady=(0, 10))
         
-        self.fetch_btn = ctk.CTkButton(
-            self.url_frame, 
-            text="Scan & Detect Page", 
-            command=self.start_fetch_info,
+        # 2. Fetch Button
+        self.fetch_button = ctk.CTkButton(
+            self.main_frame,
+            text="Fetch Video Formats",
+            command=self.start_fetch_formats,
             font=ctk.CTkFont(weight="bold"),
-            width=140
+            width=200
         )
-        self.fetch_btn.grid(row=1, column=1, padx=15, pady=(0, 15))
+        self.fetch_button.pack(pady=5)
         
-        # Extracted Metadata Container
-        self.info_frame = ctk.CTkFrame(self.main_frame)
-        self.info_frame.grid(row=2, column=0, padx=10, pady=10, sticky="ew")
-        self.info_frame.grid_columnconfigure(1, weight=1)
-        
-        self.meta_title_lbl = ctk.CTkLabel(
-            self.info_frame, 
-            text="Title: Scan a landing page to extract video", 
-            font=ctk.CTkFont(size=13, weight="bold"), 
-            anchor="w"
-        )
-        self.meta_title_lbl.grid(row=0, column=0, columnspan=2, padx=15, pady=(10, 5), sticky="ew")
-        
-        self.meta_duration_lbl = ctk.CTkLabel(self.info_frame, text="Duration: --:--", text_color="gray", anchor="w")
-        self.meta_duration_lbl.grid(row=1, column=0, padx=15, pady=(0, 10), sticky="w")
-        
-        self.meta_uploader_lbl = ctk.CTkLabel(self.info_frame, text="Source Extractor: N/A", text_color="gray", anchor="w")
-        self.meta_uploader_lbl.grid(row=1, column=1, padx=15, pady=(0, 10), sticky="w")
-        
-        # Download selectors
-        self.controls_frame = ctk.CTkFrame(self.main_frame)
-        self.controls_frame.grid(row=3, column=0, padx=10, pady=10, sticky="ew")
-        self.controls_frame.grid_columnconfigure(0, weight=1)
-        self.controls_frame.grid_columnconfigure(1, weight=1)
-        
-        # Format resolution selector
+        # 3. Format Selector Dropdown (Initially Disabled)
         self.format_label = ctk.CTkLabel(
-            self.controls_frame, 
-            text="Target Resolution:", 
-            font=ctk.CTkFont(weight="bold")
+            self.main_frame,
+            text="Select Quality Format:",
+            font=ctk.CTkFont(size=12, weight="bold")
         )
-        self.format_label.grid(row=0, column=0, padx=15, pady=(10, 5), sticky="w")
-        self.format_menu = ctk.CTkOptionMenu(
-            self.controls_frame, 
-            values=["Scan landing page first"]
+        self.format_label.pack(anchor="w", padx=30, pady=(10, 2))
+        
+        self.format_selector = ctk.CTkOptionMenu(
+            self.main_frame,
+            values=["Fetch formats to enable..."],
+            width=500,
+            state="disabled"
         )
-        self.format_menu.grid(row=1, column=0, padx=15, pady=(0, 15), sticky="ew")
+        self.format_selector.pack(padx=30, pady=(0, 10))
         
-        # Subtitle selector
-        self.sub_select_label = ctk.CTkLabel(
-            self.controls_frame, 
-            text="Subtitle (Auto-Mux/Embed):", 
-            font=ctk.CTkFont(weight="bold")
+        # 4. Subtitle URL Input Area (Optional)
+        self.sub_label = ctk.CTkLabel(
+            self.main_frame,
+            text="Subtitle URL (Optional - handles dynamic PHP/vtt/srt):",
+            font=ctk.CTkFont(size=12, weight="bold")
         )
-        self.sub_select_label.grid(row=0, column=1, padx=15, pady=(10, 5), sticky="w")
-        self.subtitle_menu = ctk.CTkOptionMenu(
-            self.controls_frame, 
-            values=["No subtitles detected"]
+        self.sub_label.pack(anchor="w", padx=30, pady=(10, 2))
+        
+        self.subtitle_url_entry = ctk.CTkEntry(
+            self.main_frame,
+            placeholder_text="e.g., http://example.com/subtitle.php?pid=123 or standard VTT/SRT URL",
+            width=500
         )
-        self.subtitle_menu.grid(row=1, column=1, padx=15, pady=(0, 15), sticky="ew")
-
-        # Custom Video Name input
-        self.custom_name_label = ctk.CTkLabel(
-            self.controls_frame, 
-            text="Custom Video Name (Optional):", 
-            font=ctk.CTkFont(weight="bold")
+        self.subtitle_url_entry.pack(padx=30, pady=(0, 10))
+        
+        # 5. Custom Filename Input Area (Optional)
+        self.filename_label = ctk.CTkLabel(
+            self.main_frame,
+            text="Custom Filename (Optional):",
+            font=ctk.CTkFont(size=12, weight="bold")
         )
-        self.custom_name_label.grid(row=2, column=0, columnspan=2, padx=15, pady=(5, 5), sticky="w")
-        self.custom_name_entry = ctk.CTkEntry(
-            self.controls_frame, 
-            placeholder_text="Defaults to webpage video title"
+        self.filename_label.pack(anchor="w", padx=30, pady=(10, 2))
+        
+        self.custom_filename_entry = ctk.CTkEntry(
+            self.main_frame,
+            placeholder_text="Leave blank to use the video's original title",
+            width=500
         )
-        self.custom_name_entry.grid(row=3, column=0, columnspan=2, padx=15, pady=(0, 15), sticky="ew")
+        self.custom_filename_entry.pack(padx=30, pady=(0, 15))
         
-        # File destination output directory
-        self.dir_frame = ctk.CTkFrame(self.main_frame)
-        self.dir_frame.grid(row=4, column=0, padx=10, pady=10, sticky="ew")
-        self.dir_frame.grid_columnconfigure(0, weight=1)
-        
-        self.dir_label = ctk.CTkLabel(
-            self.dir_frame, 
-            text="Save Folder Directory:", 
-            font=ctk.CTkFont(weight="bold")
+        # 6. Download Button
+        self.download_button = ctk.CTkButton(
+            self.main_frame,
+            text="Download",
+            command=self.start_download,
+            font=ctk.CTkFont(size=14, weight="bold"),
+            width=250,
+            height=35,
+            fg_color="#1f538d",
+            hover_color="#14375e"
         )
-        self.dir_label.grid(row=0, column=0, padx=15, pady=(10, 5), sticky="w")
+        self.download_button.pack(pady=(5, 10))
         
-        self.dir_sub_frame = ctk.CTkFrame(self.dir_frame, fg_color="transparent")
-        self.dir_sub_frame.grid(row=1, column=0, padx=15, pady=(0, 15), sticky="ew")
-        self.dir_sub_frame.grid_columnconfigure(0, weight=1)
-        
-        self.dir_entry = ctk.CTkEntry(self.dir_sub_frame)
-        self.dir_entry.insert(0, self.download_dir)
-        self.dir_entry.grid(row=0, column=0, padx=(0, 10), sticky="ew")
-        
-        self.browse_btn = ctk.CTkButton(
-            self.dir_sub_frame, 
-            text="Browse", 
-            width=80, 
-            command=self.browse_directory
-        )
-        self.browse_btn.grid(row=0, column=1)
-        
-        # Download Trigger Button
-        self.download_btn = ctk.CTkButton(
-            self.main_frame, 
-            text="Start Download & Embed Subtitles", 
-            height=46, 
-            font=ctk.CTkFont(size=14, weight="bold"), 
-            state="disabled", 
-            command=self.start_download
-        )
-        self.download_btn.grid(row=5, column=0, padx=10, pady=15, sticky="ew")
-        
-        # Progress Feedback Meter
-        self.feedback_frame = ctk.CTkFrame(self.main_frame)
-        self.feedback_frame.grid(row=6, column=0, padx=10, pady=10, sticky="ew")
-        self.feedback_frame.grid_columnconfigure(0, weight=3)
-        self.feedback_frame.grid_columnconfigure(1, weight=1)
-        self.feedback_frame.grid_columnconfigure(2, weight=1)
-        self.feedback_frame.grid_columnconfigure(3, weight=1)
-        
-        self.progress_bar = ctk.CTkProgressBar(self.feedback_frame)
-        self.progress_bar.grid(row=0, column=0, columnspan=4, padx=15, pady=(15, 10), sticky="ew")
+        # 7. Progress UI Components
+        self.progress_bar = ctk.CTkProgressBar(self.main_frame, width=500)
+        self.progress_bar.pack(padx=30, pady=(5, 5))
         self.progress_bar.set(0)
         
-        self.speed_lbl = ctk.CTkLabel(self.feedback_frame, text="Speed: -- KB/s", anchor="w")
-        self.speed_lbl.grid(row=1, column=0, padx=15, pady=(0, 15), sticky="w")
-        
-        self.eta_lbl = ctk.CTkLabel(self.feedback_frame, text="ETA: --:--", anchor="w")
-        self.eta_lbl.grid(row=1, column=1, padx=15, pady=(0, 15), sticky="w")
-        
-        self.size_lbl = ctk.CTkLabel(self.feedback_frame, text="Size: 0.0 MB", anchor="w")
-        self.size_lbl.grid(row=1, column=2, padx=15, pady=(0, 15), sticky="w")
-        
-        self.percent_lbl = ctk.CTkLabel(
-            self.feedback_frame, 
-            text="0.0%", 
-            font=ctk.CTkFont(weight="bold")
+        self.status_label = ctk.CTkLabel(
+            self.main_frame,
+            text="Ready. Enter a video URL and click 'Fetch Video Formats'.",
+            font=ctk.CTkFont(size=11),
+            text_color="#a3a3a3",
+            wraplength=520
         )
-        self.percent_lbl.grid(row=1, column=3, padx=15, pady=(0, 15), sticky="e")
-        
-        # Internal log console output terminal
-        self.log_label = ctk.CTkLabel(
-            self.main_frame, 
-            text="Media Extractor Log stream:", 
-            font=ctk.CTkFont(weight="bold")
-        )
-        self.log_label.grid(row=7, column=0, padx=10, pady=(10, 0), sticky="w")
-        
-        self.log_text = ctk.CTkTextbox(
-            self.main_frame, 
-            height=160, 
-            font=ctk.CTkFont(family="Courier", size=11)
-        )
-        self.log_text.grid(row=8, column=0, padx=10, pady=(5, 10), sticky="ew")
-        self.log_text.configure(state="disabled")
-        
-        self.write_log("Application initialized. Ready to scan landing page URLs.")
+        self.status_label.pack(padx=30, pady=(0, 15))
 
-    def change_theme_color(self, choice):
-        ctk.set_default_color_theme(choice)
-        self.write_log(f"Theme color switched to: {choice}. Restart window to fully load accents.")
+    # Safe helpers to update UI states from background threads
+    def update_status(self, text, color="#a3a3a3"):
+        self.status_label.configure(text=text, text_color=color)
 
-    def browse_directory(self):
-        selected = filedialog.askdirectory(initialdir=self.download_dir, title="Select Output Save Folder")
-        if selected:
-            self.download_dir = selected
-            self.dir_entry.delete(0, tk.END)
-            self.dir_entry.insert(0, selected)
-            self.write_log(f"Output folder updated: {selected}")
+    def set_progress(self, val):
+        self.progress_bar.set(val)
 
-    def write_log(self, text):
-        self.log_text.configure(state="normal")
-        self.log_text.insert(tk.END, f"{text}\\n")
-        self.log_text.see(tk.END)
-        self.log_text.configure(state="disabled")
-
-    # Multi-threading fetching worker
-    def start_fetch_info(self):
-        url = self.url_entry.get().strip()
+    # ==================== PHASE 1: Fetching Formats ====================
+    def start_fetch_formats(self):
+        url = self.video_url_entry.get().strip()
         if not url:
-            messagebox.showerror("Validation Error", "Please paste a video or landing page URL first!")
+            messagebox.showerror("Error", "Please enter a valid video URL first!")
             return
             
         if self.is_fetching or self.is_downloading:
             return
             
         self.is_fetching = True
-        self.fetch_btn.configure(state="disabled")
-        self.write_log(f"Querying landing page details: {url}")
+        self.fetch_button.configure(state="disabled", text="Fetching info...")
+        self.update_status("Querying video details from server... Please wait.")
         
-        # Execute extractor in non-blocking daemon thread
-        t = threading.Thread(target=self._fetch_info_worker, args=(url,), daemon=True)
-        t.start()
+        # Spin up daemon thread to prevent freezing the main UI
+        thread = threading.Thread(target=self._fetch_formats_worker, args=(url,), daemon=True)
+        thread.start()
 
-    def _fetch_info_worker(self, url):
-        # DRM Shield
-        drm_domains = ["netflix.com", "hulu.com", "disneyplus.com", "hbo.com", "hbomax.com", "primevideo.com"]
-        if any(domain in url.lower() for domain in drm_domains):
-            self.after(
-                0, 
-                lambda: self._on_fetch_failed(
-                    "DRM-Protected Stream. Copy-protected content is bypassed per platform policy."
-                )
-            )
-            return
-            
+    def _fetch_formats_worker(self, url):
         try:
             ydl_opts = {
                 'quiet': True,
                 'no_warnings': True,
-                'extract_flat': False
+                'extract_flat': False,
             }
-            
-            # Extract webpage meta using yt-dlp native extraction capabilities
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
+                self.video_title = info.get('title', 'video')
+                formats = info.get('formats', [])
                 
-            self.after(0, lambda: self._on_fetch_success(info, url))
-            
+                # Parse unique visual heights and their containers
+                seen_resolutions = set()
+                parsed_formats = []
+                
+                for f in formats:
+                    height = f.get('height')
+                    ext = f.get('ext') or 'mp4'
+                    # Prioritize formats with actual height dimensions
+                    if height and height not in seen_resolutions:
+                        seen_resolutions.add(height)
+                        parsed_formats.append({
+                            'label': f"{height}p - {ext}",
+                            'height': height,
+                            'ext': ext
+                        })
+                
+                # Sort descending by resolution height
+                parsed_formats.sort(key=lambda x: x['height'], reverse=True)
+                
+                # Update UI elements
+                self.after(0, lambda: self._on_fetch_success(parsed_formats))
+                
         except Exception as e:
-            # Fallback parsing strategy!
-            # If native yt_dlp fails because the site lacks a dedicated extractor, we fall back
-            # to scanning the raw HTML page for streaming assets or subtitle files.
-            self.after(0, lambda: self.write_log("Native extraction failed. Attempting Fallback HTML regex parsing..."))
-            self._run_fallback_regex_scraper(url, str(e))
+            self.after(0, lambda: self._on_fetch_failed(str(e)))
 
-    def _run_fallback_regex_scraper(self, url, original_err):
-        """
-        FALLBACK SCRAPER STRATEGY (BS4 / Regex Placeholder):
-        Performs raw HTTP scanning to locate .m3u8 index files, .vtt files, or subtitle paths
-        inside the HTML source when yt-dlp's native extractors are not supported on the target page.
-        """
-        try:
-            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-            req = urllib.request.Request(url, headers=headers)
-            
-            with urllib.request.urlopen(req, timeout=8) as response:
-                html_content = response.read().decode('utf-8', errors='ignore')
-                
-            # Search for typical .m3u8, .mp4, and subtitle formats (.vtt/.srt)
-            stream_links = re.findall(r'(https?://[^\\s"\\']+\\.m3u8[^\\s"\\']*)', html_content)
-            mp4_links = re.findall(r'(https?://[^\\s"\\']+\\.mp4[^\\s"\\']*)', html_content)
-            vtt_links = re.findall(r'(https?://[^\\s"\\']+\\.vtt[^\\s"\\']*)', html_content)
-            
-            if stream_links or mp4_links:
-                detected_link = stream_links[0] if stream_links else mp4_links[0]
-                self.after(0, lambda: self.write_log(f"Fallback scraper successfully found media asset: {detected_link}"))
-                
-                # Setup mock info structure to pass to downstream
-                mock_info = {
-                    'title': 'Detected Media Stream (Fallback Scraped)',
-                    'extractor_key': 'Fallback Scraper',
-                    'url': detected_link,
-                    'formats': [{'url': detected_link, 'height': 1080, 'ext': 'mp4' if 'mp4' in detected_link else 'm3u8'}],
-                    'duration': 0,
-                    'subtitles': {
-                        'scraped_vtt': [{'url': v, 'ext': 'vtt'} for v in vtt_links]
-                    } if vtt_links else {}
-                }
-                self.after(0, lambda: self._on_fetch_success(mock_info, url))
-            else:
-                raise Exception(f"No streaming elements found in raw landing page. Original Error: {original_err}")
-                
-        except Exception as fallback_err:
-            self.after(0, lambda: self._on_fetch_failed(f"Extraction & Fallback Scraper both failed:\\n{fallback_err}"))
-
-    def _on_fetch_success(self, info, url):
+    def _on_fetch_success(self, parsed_formats):
         self.is_fetching = False
-        self.fetch_btn.configure(state="normal")
-        self.fetched_info = info
-        self.target_url = url
+        self.fetch_button.configure(state="normal", text="Fetch Video Formats")
         
-        title = info.get('title', 'Unknown Landing Page Video')
-        duration = info.get('duration', 0)
-        extractor = info.get('extractor_key', 'Generic URL')
+        # Create dropdown items list
+        dropdown_options = [f['label'] for f in parsed_formats]
+        dropdown_options.append("Best (Default)")
         
-        mins, secs = divmod(int(duration or 0), 60)
-        hours, mins = divmod(mins, 60)
-        duration_str = f"{hours:02d}:{mins:02d}:{secs:02d}" if hours else f"{mins:02d}:{secs:02d}"
+        # Populate selector and enable
+        self.format_selector.configure(values=dropdown_options, state="normal")
+        self.format_selector.set(dropdown_options[0])
         
-        self.meta_title_lbl.configure(text=f"Title: {title}")
-        self.meta_duration_lbl.configure(text=f"Duration: {duration_str if duration else 'Detected Stream'}")
-        self.meta_uploader_lbl.configure(text=f"Source: {extractor}")
-        
-        # Parse available formats/resolutions
-        formats = info.get('formats', [])
-        format_options = ["Best Resolution (Merged Auto)"]
-        
-        seen_res = set()
-        for f in formats:
-            height = f.get('height')
-            ext = f.get('ext', '')
-            if height and height not in seen_res:
-                seen_res.add(height)
-                format_options.append(f"{height}p - {ext.upper()} (Stitched Format)")
-                
-        format_options.append("Best Audio Track Only (MP3)")
-        self.format_menu.configure(values=format_options)
-        self.format_menu.set(format_options[0])
-        
-        # Parse available subtitles (and automatic captions)
-        subtitles = info.get('subtitles', {}) or {}
-        auto_captions = info.get('automatic_captions', {}) or {}
-        
-        sub_list = ["No subtitle selected"]
-        for lang_code in subtitles.keys():
-            sub_list.append(f"{lang_code} (Native)")
-        for lang_code in auto_captions.keys():
-            sub_list.append(f"{lang_code} (Auto-Generated)")
-            
-        self.subtitle_menu.configure(values=sub_list)
-        self.subtitle_menu.set(sub_list[0])
-        
-        self.download_btn.configure(state="normal")
-        self.write_log(f"Successfully analyzed landing page: '{title}'")
-        self.write_log(f"Detected {len(format_options)-1} formats and {len(sub_list)-1} subtitles.")
+        self.update_status(f"Parsed {len(parsed_formats)} formats. Video Title: '{self.video_title}'", "#4ade80")
 
-    def _on_fetch_failed(self, err_msg):
+    def _on_fetch_failed(self, error_msg):
         self.is_fetching = False
-        self.fetch_btn.configure(state="normal")
-        self.download_btn.configure(state="disabled")
-        self.meta_title_lbl.configure(text="Title: Fetch Extraction Failed")
-        self.meta_duration_lbl.configure(text="Duration: --:--")
-        self.meta_uploader_lbl.configure(text="Source: N/A")
-        
-        self.write_log(f"EXTRACTION ERROR: {err_msg}")
-        messagebox.showerror("Metadata Error", f"Failed to retrieve stream details:\\n{err_msg}")
+        self.fetch_button.configure(state="normal", text="Fetch Video Formats")
+        self.format_selector.configure(values=["Fetch formats to enable..."], state="disabled")
+        self.format_selector.set("Fetch formats to enable...")
+        self.update_status(f"Error fetching formats: {error_msg}", "#f87171")
+        messagebox.showerror("Format Extraction Failed", f"Failed to retrieve format details:\\n{error_msg}")
 
-    # Asynchronous download process
+    # ==================== PHASE 2: Downloading & Merging ====================
     def start_download(self):
-        if not self.fetched_info or self.is_downloading:
+        url = self.video_url_entry.get().strip()
+        if not url:
+            messagebox.showerror("Error", "Please enter a valid video URL first!")
+            return
+            
+        if self.is_downloading or self.is_fetching:
             return
             
         self.is_downloading = True
-        self.download_btn.configure(state="disabled", text="Processing video & subtitle merge...")
-        self.fetch_btn.configure(state="disabled")
+        self.download_button.configure(state="disabled", text="Downloading...")
+        self.set_progress(0)
+        self.update_status("Initializing download pipeline...")
         
-        # Reset progress components
-        self.progress_bar.set(0)
-        self.percent_lbl.configure(text="0.0%")
-        self.speed_lbl.configure(text="Speed: Connecting...")
-        self.eta_lbl.configure(text="ETA: Calculating...")
-        self.size_lbl.configure(text="Size: -- MB")
+        # Spin up daemon thread to prevent freezing the main UI
+        thread = threading.Thread(target=self._download_worker, args=(url,), daemon=True)
+        thread.start()
+
+    def _download_worker(self, url):
+        selected_fmt = self.format_selector.get()
+        subtitle_url = self.subtitle_url_entry.get().strip()
+        custom_name = self.custom_filename_entry.get().strip()
         
-        self.write_log("Starting landing page downloader thread...")
-        t = threading.Thread(target=self._download_worker, daemon=True)
-        t.start()
-
-    def download_dynamic_vtt(self, url, dest_path):
-        """
-        Helper function to download dynamic/raw WebVTT content and save it locally.
-        Handles dynamic endpoints returning raw text starting with WEBVTT.
-        """
-        try:
-            import requests
-            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-            r = requests.get(url, headers=headers, timeout=10)
-            content = r.text
-        except Exception as e:
-            # Fallback to standard urllib.request
-            try:
-                import urllib.request
-                headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-                req = urllib.request.Request(url, headers=headers)
-                with urllib.request.urlopen(req, timeout=10) as response:
-                    content = response.read().decode('utf-8', errors='ignore')
-            except Exception as inner_e:
-                self.after(0, lambda: self.write_log(f"Error fetching dynamic subtitle: {inner_e}"))
-                return False
-
-        # Verify if it contains WEBVTT signature
-        if "WEBVTT" in content or "vtt" in url.lower():
-            try:
-                with open(dest_path, "w", encoding="utf-8") as f:
-                    f.write(content)
-                return True
-            except Exception as write_err:
-                self.after(0, lambda: self.write_log(f"Error saving dynamic subtitle locally: {write_err}"))
-        return False
-
-    def _download_worker(self):
-        url = self.target_url
-        selected_fmt = self.format_menu.get()
-        selected_sub = self.subtitle_menu.get()
-        out_dir = self.dir_entry.get().strip() or self.download_dir
-        
-        # 1. Read custom video name entry and configure outtmpl option
-        custom_name = self.custom_name_entry.get().strip()
+        # Setup output templates
         if custom_name:
-            # Clean invalid characters for safe file names
-            safe_name = "".join([c for c in custom_name if c.isalpha() or c.isdigit() or c in ' ._-']).strip()
-            if not safe_name:
-                safe_name = "Custom_Video"
-            outtmpl_path = os.path.join(out_dir, f"{safe_name}.%(ext)s")
-            self.after(0, lambda: self.write_log(f"Configuring custom filename: {safe_name}"))
+            # Strip illegal characters for filenames
+            clean_name = "".join([c for c in custom_name if c.isalpha() or c.isdigit() or c in ' ._-']).strip()
+            if not clean_name:
+                clean_name = "custom_video"
+            out_template = f"{clean_name}.%(ext)s"
+            final_display_name = clean_name
         else:
-            outtmpl_path = os.path.join(out_dir, "%(title)s.%(ext)s")
+            out_template = "%(title)s.%(ext)s"
+            final_display_name = self.video_title or "Downloaded Video"
 
-        # Format query mapper
-        format_query = "bestvideo+bestaudio/best"
-        if "Audio Track Only" in selected_fmt:
-            format_query = "bestaudio/best"
-        elif "p" in selected_fmt:
-            res = selected_fmt.split("p")[0].strip()
-            format_query = f"bestvideo[height<={res}]+bestaudio/best[height<={res}]"
+        # Map selected dropdown resolution back to yt-dlp queries
+        format_query = 'bestvideo+bestaudio/best'
+        if selected_fmt != "Best (Default)" and "p" in selected_fmt:
+            try:
+                res = selected_fmt.split("p")[0].strip()
+                format_query = f"bestvideo[height<={res}]+bestaudio/best[height<={res}]"
+            except:
+                pass
 
-        # Safe custom stdout logger
-        class GUIStreamLogger:
-            def __init__(self, app):
-                self.app = app
-            def debug(self, msg):
-                if msg.startswith("[debug]") or msg.strip() == "": return
-                self.app.after(0, lambda: self.app.write_log(msg))
-            def info(self, msg):
-                self.app.after(0, lambda: self.app.write_log(msg))
-            def warning(self, msg):
-                self.app.after(0, lambda: self.app.write_log(f"WARNING: {msg}"))
-            def error(self, msg):
-                self.app.after(0, lambda: self.app.write_log(f"ERROR: {msg}"))
-
-        # Progress stats callback hook
-        def download_progress_hook(d):
+        # Progress hooks for live progress bar
+        def progress_hook(d):
             if d['status'] == 'downloading':
                 total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
                 downloaded = d.get('downloaded_bytes', 0)
                 speed = d.get('speed', 0)
                 eta = d.get('eta', 0)
                 
-                pct = (downloaded / total * 100) if total > 0 else 0
-                size_mb = total / (1024 * 1024) if total else 0
+                pct = (downloaded / total) if total > 0 else 0
+                pct_percentage = pct * 100
                 
                 speed_str = "0 KB/s"
                 if speed:
@@ -615,230 +330,177 @@ class SmartVideoDownloaderApp(ctk.CTk):
                     m, s = divmod(int(eta), 60)
                     eta_str = f"{m:02d}:{s:02d}"
                     
-                self.after(0, lambda: self._update_gui_progress(pct, speed_str, eta_str, size_mb))
+                status_text = f"Downloading: {pct_percentage:.1f}% | Speed: {speed_str} | ETA: {eta_str}"
+                self.after(0, lambda: self.set_progress(pct))
+                self.after(0, lambda: self.update_status(status_text, "#60a5fa"))
+                
             elif d['status'] == 'finished':
-                self.after(0, lambda: self.write_log("Video tracks fetched successfully. Merging audio, video & subtitles..."))
+                self.after(0, lambda: self.update_status("Video download complete. Merging streams..."))
 
         ydl_opts = {
             'format': format_query,
-            'outtmpl': outtmpl_path,
-            'logger': GUIStreamLogger(self),
-            'progress_hooks': [download_progress_hook],
-            'merge_output_format': 'mkv',  # MKV supports embedding subtitle streams without re-encoding
-            'noplaylist': True,
+            'outtmpl': out_template,
+            'merge_output_format': 'mp4',  # Standard merging format
+            'progress_hooks': [progress_hook],
+            'quiet': True,
+            'no_warnings': True
         }
-        
-        # 2. Handling Dynamic / Scraped Subtitle URLs
-        temp_subtitle_path = os.path.join(out_dir, "temp_subtitle.vtt")
-        has_local_vtt = False
 
-        if selected_sub != "No subtitle selected" and self.fetched_info:
-            subtitles_dict = self.fetched_info.get('subtitles', {}) or {}
-            
-            # Check if this is a scraped subtitle (dynamic link) from fallback scraper
-            if 'scraped_vtt' in subtitles_dict:
-                scraped_list = subtitles_dict['scraped_vtt']
-                for sub_item in scraped_list:
-                    sub_url = sub_item.get('url')
-                    if sub_url:
-                        self.after(0, lambda: self.write_log(f"Scraped WebVTT subtitle link identified: {sub_url}"))
-                        self.after(0, lambda: self.write_log("Fetching subtitle text from dynamic endpoint..."))
-                        if self.download_dynamic_vtt(sub_url, temp_subtitle_path):
-                            has_local_vtt = True
-                            self.after(0, lambda: self.write_log("Successfully downloaded and saved dynamic WebVTT locally."))
-                            break
-            
-            # If it's a standard/native subtitle, let yt-dlp manage embedding automatically
-            if not has_local_vtt:
-                lang_code = selected_sub.split(" ")[0].strip()
-                ydl_opts['writesubtitles'] = True
-                ydl_opts['allsubtitles'] = False
-                ydl_opts['subtitleslangs'] = [lang_code]
-                ydl_opts['embedsubtitles'] = True
-                if "Auto-Generated" in selected_sub:
-                    ydl_opts['writeautomaticsub'] = True
-                self.after(0, lambda: self.write_log(f"Subtitles enabled: [{lang_code}]. Native embedding activated."))
-
-        if "Audio Track Only" in selected_fmt:
-            ydl_opts['merge_output_format'] = None
-            ydl_opts['postprocessors'] = [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }]
+        # Handle condition boundaries
+        temp_subs_path = "temp_subs.vtt"
+        has_subtitle = False
 
         try:
-            # Perform yt-dlp download
+            # 1. First download the video using yt-dlp (Common to both A and B)
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info_dict = ydl.extract_info(url, download=True)
                 downloaded_file = ydl.prepare_filename(info_dict)
-                # Correct final extension post merging
-                if "Audio Track Only" not in selected_fmt:
-                    base, _ = os.path.splitext(downloaded_file)
-                    downloaded_file = base + ".mkv"
-
-            # 3. Custom FFmpeg merging of locally saved WebVTT subtitle
-            if has_local_vtt and os.path.exists(temp_subtitle_path) and os.path.exists(downloaded_file):
-                self.after(0, lambda: self.write_log("FFmpeg: Muxing locally scraped subtitle track into container..."))
-                import subprocess
-                muxed_file = downloaded_file.replace(".mkv", "_muxed.mkv")
                 
-                # FFmpeg soft muxing command
+                # Check for merged output format extensions
+                base, _ = os.path.splitext(downloaded_file)
+                final_video_path = f"{base}.mp4"
+                if not os.path.exists(final_video_path):
+                    if os.path.exists(downloaded_file):
+                        final_video_path = downloaded_file
+                    else:
+                        # Fallback list search for matching downloaded chunks
+                        for f in os.listdir('.'):
+                            if f.startswith(os.path.basename(base)) and f != temp_subs_path:
+                                final_video_path = f
+                                break
+
+            # 2. Condition B: Subtitle URL is FILLED
+            if subtitle_url:
+                self.after(0, lambda: self.update_status("Fetching subtitle track from URL..."))
+                
+                # Download subtitle content via requests
+                headers = {'User-Agent': 'Mozilla/5.0'}
+                response = requests.get(subtitle_url, headers=headers, timeout=15)
+                response.raise_for_status()
+                sub_content = response.text
+                
+                # Save raw content locally as temp_subs.vtt
+                with open(temp_subs_path, "w", encoding="utf-8") as sub_file:
+                    sub_file.write(sub_content)
+                has_subtitle = True
+                
+                self.after(0, lambda: self.update_status("Muxing video & subtitle with FFmpeg..."))
+                
+                # Mux video and subtitles into single final media container
+                # Output as .mkv by default to preserve maximum metadata and support srt/vtt embedding flawlessly
+                name_no_ext, _ = os.path.splitext(final_video_path)
+                muxed_video_path = f"{name_no_ext}_muxed.mkv"
+                
+                # FFmpeg command to copy streams and map the subtitle track
                 cmd = [
                     'ffmpeg', '-y',
-                    '-i', downloaded_file,
-                    '-i', temp_subtitle_path,
+                    '-i', final_video_path,
+                    '-i', temp_subs_path,
                     '-c', 'copy',
-                    '-c:s', 'srt',  # MKV container handles SRT subtitles seamlessly
+                    '-c:s', 'srt',  # soft subtitles inside MKV
                     '-metadata:s:s:0', 'language=eng',
-                    muxed_file
+                    muxed_video_path
                 ]
                 
-                try:
-                    subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-                    if os.path.exists(muxed_file):
-                        os.remove(downloaded_file)
-                        os.rename(muxed_file, downloaded_file)
-                        self.after(0, lambda: self.write_log("FFmpeg soft muxing sequence completed successfully."))
-                except Exception as ffmpeg_err:
-                    self.after(0, lambda: self.write_log(f"FFmpeg subprocess error: {ffmpeg_err}"))
-                finally:
-                    # Cleanup local temp files
-                    if os.path.exists(temp_subtitle_path):
-                        try:
-                            os.remove(temp_subtitle_path)
-                        except:
-                            pass
+                # Execute FFmpeg subprocess
+                result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+                
+                if os.path.exists(muxed_video_path):
+                    # Remove original un-muxed file and replace with muxed version
+                    if os.path.exists(final_video_path):
+                        os.remove(final_video_path)
+                    
+                    final_output_path = f"{name_no_ext}.mkv"
+                    if os.path.exists(final_output_path):
+                        os.remove(final_output_path)
+                    os.rename(muxed_video_path, final_output_path)
+                    final_video_path = final_output_path
+                    self.after(0, lambda: self.update_status("Subtitle track embedded successfully.", "#4ade80"))
+                else:
+                    raise Exception("FFmpeg executed but muxed file was not generated.")
 
-            self.after(0, self._on_download_complete)
+            self.after(0, lambda: self._on_download_success(final_video_path))
+            
         except Exception as e:
             self.after(0, lambda: self._on_download_failed(str(e)))
+            
+        finally:
+            # Clean up (delete) the temp_subs.vtt file if it exists
+            if os.path.exists(temp_subs_path):
+                try:
+                    os.remove(temp_subs_path)
+                except Exception as clean_err:
+                    print(f"Error cleaning up temp subtitle file: {clean_err}")
 
-    def _update_gui_progress(self, percent, speed_str, eta_str, size_mb):
-        self.progress_bar.set(percent / 100)
-        self.percent_lbl.configure(text=f"{percent:.1f}%")
-        self.speed_lbl.configure(text=f"Speed: {speed_str}")
-        self.eta_lbl.configure(text=f"ETA: {eta_str}")
-        self.size_lbl.configure(text=f"Size: {size_mb:.1f} MB")
-
-    def _on_download_complete(self):
+    def _on_download_success(self, filepath):
         self.is_downloading = False
-        self.download_btn.configure(state="normal", text="Start Download & Embed Subtitles")
-        self.fetch_btn.configure(state="normal")
-        self.progress_bar.set(1.0)
-        self.percent_lbl.configure(text="100.0%")
-        self.speed_lbl.configure(text="Speed: Complete")
-        self.eta_lbl.configure(text="ETA: Finished")
-        
-        self.write_log("DOWNLOAD SUCCESS: Saved video format & successfully soft-embedded subtitle track.")
-        messagebox.showinfo("Success", "Media and subtitle streams merged & embedded successfully!")
+        self.download_button.configure(state="normal", text="Download")
+        self.set_progress(1.0)
+        self.update_status(f"Download complete! Saved as '{os.path.basename(filepath)}'", "#4ade80")
+        messagebox.showinfo("Success", f"Video download and pipeline process completed successfully!\\nSaved to: {os.path.abspath(filepath)}")
 
-    def _on_download_failed(self, error):
+    def _on_download_failed(self, error_msg):
         self.is_downloading = False
-        self.download_btn.configure(state="normal", text="Start Download & Embed Subtitles")
-        self.fetch_btn.configure(state="normal")
-        self.write_log(f"DOWNLOAD ERROR: {error}")
-        messagebox.showerror("Download Error", f"Processing failed:\\n{error}")
+        self.download_button.configure(state="normal", text="Download")
+        self.update_status(f"Error: {error_msg}", "#f87171")
+        messagebox.showerror("Download Failed", f"An error occurred during download or post-processing:\\n{error_msg}")
 
 if __name__ == "__main__":
-    app = SmartVideoDownloaderApp()
+    app = UniversalVideoDownloader()
     app.mainloop()
 `;
 };
 
-// URL Presets for the interactive simulator
-interface Preset {
+// Preset definition for our interactive simulator
+interface VideoPreset {
   name: string;
   url: string;
-  icon: React.ReactNode;
-  duration: number;
+  subtitleUrl: string;
   title: string;
-  uploader: string;
+  duration: string;
+  provider: string;
   formats: string[];
-  subtitles?: string[];
-  type: 'youtube' | 'm3u8' | 'vimeo' | 'drm';
+  description: string;
 }
 
-const PRESETS: Preset[] = [
+const PRESETS: VideoPreset[] = [
   {
-    name: 'YouTube Standard (1080p)',
+    name: 'YouTube Standard (Condition A - Video Only)',
     url: 'https://www.youtube.com/watch?v=aqz-KE-bpKQ',
-    icon: <Video className="w-4 h-4 text-red-500" />,
-    duration: 342,
+    subtitleUrl: '', // EMPTY -> Condition A
     title: 'How Rockets Work - SpaceX Flight Mechanics 101',
-    uploader: 'RocketScienceHQ',
-    formats: [
-      '1080p - MP4 (124.5 MB)',
-      '720p - MP4 (68.2 MB)',
-      '480p - MP4 (34.0 MB)',
-      'Best Audio Only - M4A (12.4 MB)'
-    ],
-    subtitles: [
-      'No subtitle selected',
-      'en (Native)',
-      'es (Auto-Generated)',
-      'fr (Auto-Generated)'
-    ],
-    type: 'youtube'
+    duration: '05:42',
+    provider: 'YouTube',
+    formats: ['1080p - mp4', '720p - mp4', '480p - mp4', 'Best (Default)'],
+    description: 'Models a standard YouTube video download with no external subtitle file. Saves as a clean .mp4 file.'
   },
   {
-    name: 'Raw HLS Live Stream (.m3u8)',
-    url: 'https://streaming.service.example/live/news_feed.m3u8',
-    icon: <Globe className="w-4 h-4 text-blue-400" />,
-    duration: 0, // live stream
-    title: 'Global Live News Feed - Broadcast Manifest',
-    uploader: 'GlobalBroadcastCorp',
-    formats: [
-      'Best Resolution Merged (.mp4) (~2.4 MB/min)',
-      'Stream Resolution 720p (.mp4) (~1.8 MB/min)',
-      'Audio Stream Track Only (.aac) (~0.4 MB/min)'
-    ],
-    subtitles: [
-      'No subtitle selected'
-    ],
-    type: 'm3u8'
-  },
-  {
-    name: 'Vimeo Cinematic Short (4K)',
+    name: 'Vimeo Cinematic (Condition B - Video + Subtitle)',
     url: 'https://vimeo.com/894732104',
-    icon: <Play className="w-4 h-4 text-sky-400" />,
-    duration: 128,
+    subtitleUrl: 'https://cinemacaptions.api/subtitles.php?id=drone_seq_en', // FILLED -> Condition B
     title: 'Over the Glacier - Cinematic drone sequence of Svalbard',
-    uploader: 'NordicFocusFilms',
-    formats: [
-      '2160p (4K) - MKV (285.0 MB)',
-      '1080p - MP4 (92.5 MB)',
-      '720p - MP4 (44.2 MB)',
-      'Best Audio Only - M4A (4.1 MB)'
-    ],
-    subtitles: [
-      'No subtitle selected',
-      'en (Native)',
-      'it (Native)'
-    ],
-    type: 'vimeo'
+    duration: '02:08',
+    provider: 'Vimeo',
+    formats: ['2160p - mkv', '1080p - mp4', '720p - mp4', 'Best (Default)'],
+    description: 'Models custom subtitle integration. Downloads a .mp4 video, fetches WebVTT subtitling text from a dynamic PHP endpoint, muxes them into a single soft-embedded subtitle .mkv package via FFmpeg, and deletes the temporary files.'
   },
   {
-    name: 'Netflix Stream (DRM Blocked)',
-    url: 'https://www.netflix.com/title/80100172',
-    icon: <AlertTriangle className="w-4 h-4 text-amber-500" />,
-    duration: 0,
-    title: 'Locked Content',
-    uploader: 'Netflix Inc.',
-    formats: [],
-    subtitles: [
-      'No subtitle selected'
-    ],
-    type: 'drm'
+    name: 'HLS news feed stream (Condition A - Video Only)',
+    url: 'https://streaming.service.example/live/news_feed.m3u8',
+    subtitleUrl: '',
+    title: 'Global Live News Feed - Broadcast Manifest',
+    duration: 'Live Stream',
+    provider: 'HLS / m3u8',
+    formats: ['1080p - m3u8', '720p - m3u8', 'Best (Default)'],
+    description: 'Models downloading a live HLS segment stream. Saves as a continuous segment without sub-tracks.'
   }
 ];
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'emulator' | 'code' | 'commands' | 'setup'>('emulator');
+  const [activeTab, setActiveTab] = useState<'emulator' | 'code' | 'setup'>('emulator');
   
   // Customization state that updates Python code live
   const [accentColor, setAccentColor] = useState<string>('blue');
-  const [defaultDir, setDefaultDir] = useState<string>('C:\\\\Users\\\\User\\\\Downloads');
   const [copiedCode, setCopiedCode] = useState<boolean>(false);
 
   // Elegant floating notification state
@@ -850,33 +512,27 @@ export default function App() {
     }, 4000);
   };
 
-  // Simulator specific state
+  // Simulator specific state (mapping exactly to CustomTkinter components)
   const [simulatorUrl, setSimulatorUrl] = useState<string>('https://www.youtube.com/watch?v=aqz-KE-bpKQ');
   const [isFetchingSim, setIsFetchingSim] = useState<boolean>(false);
-  const [simMetadata, setSimMetadata] = useState<Preset | null>(null);
-  const [selectedFormatSim, setSelectedFormatSim] = useState<string>('');
-  const [selectedSubtitleSim, setSelectedSubtitleSim] = useState<string>('No subtitle selected');
-  const [customVideoNameSim, setCustomVideoNameSim] = useState<string>('');
-  const [simSaveDir, setSimSaveDir] = useState<string>('/Users/developer/Downloads');
+  const [fetchedMetadataSim, setFetchedMetadataSim] = useState<VideoPreset | null>(null);
+  const [selectedFormatSim, setSelectedFormatSim] = useState<string>('Fetch formats to enable...');
+  const [isFormatMenuEnabled, setIsFormatMenuEnabled] = useState<boolean>(false);
+  
+  const [subtitleUrlSim, setSubtitleUrlSim] = useState<string>('');
+  const [customFilenameSim, setCustomFilenameSim] = useState<string>('');
   const [isDownloadingSim, setIsDownloadingSim] = useState<boolean>(false);
   const [simProgress, setSimProgress] = useState<number>(0);
-  const [simSpeed, setSimSpeed] = useState<string>('0 KB/s');
-  const [simEta, setSimEta] = useState<string>('--:--');
-  const [simSize, setSimSize] = useState<string>('0.0 MB');
+  const [simStatusLabel, setSimStatusLabel] = useState<string>("Ready. Enter a video URL and click 'Fetch Video Formats'.");
+  const [simStatusColor, setSimStatusColor] = useState<string>("text-slate-400");
+  
+  // Terminal diagnostics log streams
   const [simLogs, setSimLogs] = useState<string[]>([
-    'Application initialized successfully. Ready to analyze video URL inputs.',
-    'System path scanned: Python v3.11.4 found, yt-dlp core loaded (v2025.01.15).'
+    '[system] UniversalVideoDownloader class initialized.',
+    '[system] Python 3.11 wrapper ready. CustomTkinter UI framework loaded.',
+    '[system] yt-dlp core detected (v2026.03.10).'
   ]);
 
-  // Command generator state
-  const [cliUrl, setCliUrl] = useState<string>('https://www.youtube.com/watch?v=aqz-KE-bpKQ');
-  const [cliFormat, setCliFormat] = useState<string>('merged');
-  const [cliRes, setCliRes] = useState<string>('1080');
-  const [cliSubtitles, setCliSubtitles] = useState<boolean>(true);
-  const [cliThumbnail, setCliThumbnail] = useState<boolean>(true);
-  const [copiedCli, setCopiedCli] = useState<boolean>(false);
-
-  // Auto-scroll logs Ref
   const logEndRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (logEndRef.current) {
@@ -886,7 +542,7 @@ export default function App() {
 
   // Handler to copy code block
   const handleCopyCode = () => {
-    const code = generatePythonCode(accentColor, defaultDir);
+    const code = generatePythonCode(accentColor);
     navigator.clipboard.writeText(code);
     setCopiedCode(true);
     showToast("Successfully copied downloader.py script to clipboard!");
@@ -895,7 +551,7 @@ export default function App() {
 
   // Helper to trigger direct python script download
   const handleDownloadPyScript = () => {
-    const code = generatePythonCode(accentColor, defaultDir);
+    const code = generatePythonCode(accentColor);
     const blob = new Blob([code], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -905,12 +561,21 @@ export default function App() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+    showToast("Downloaded downloader.py file directly to your disk!");
   };
 
   // Quick select preset
-  const handleSelectPreset = (preset: Preset) => {
+  const handleSelectPreset = (preset: VideoPreset) => {
     setSimulatorUrl(preset.url);
-    addLog(`Pasted preset link: ${preset.url}`);
+    setSubtitleUrlSim(preset.subtitleUrl);
+    // Clear out fetched state so user can experience "Fetch" step
+    setFetchedMetadataSim(null);
+    setIsFormatMenuEnabled(false);
+    setSelectedFormatSim('Fetch formats to enable...');
+    setSimProgress(0);
+    setSimStatusLabel("Preset loaded! Click 'Fetch Video Formats' to query available formats.");
+    setSimStatusColor("text-sky-400");
+    addLog(`[UI] Pasted preset: ${preset.name}`);
   };
 
   // Add a log line to simulated console
@@ -919,200 +584,226 @@ export default function App() {
     setSimLogs(prev => [...prev, `[${timestamp}] ${msg}`]);
   };
 
-  // Run simulated fetch metadata info
+  // Run simulated fetch metadata info (Phase 1)
   const handleSimFetchInfo = () => {
     if (!simulatorUrl.trim()) {
-      addLog('ERROR: URL input is empty. Paste a link first.');
+      addLog('ERROR: Video URL input is empty!');
+      setSimStatusLabel("Error: Enter a valid video URL first!");
+      setSimStatusColor("text-red-400");
       return;
     }
 
     setIsFetchingSim(true);
-    setSimMetadata(null);
-    addLog(`[extractor] Initiating connection to check domain permissions...`);
-    addLog(`[downloader] Fetching HTML/Metadata payload for URL: ${simulatorUrl}`);
+    setFetchedMetadataSim(null);
+    setIsFormatMenuEnabled(false);
+    setSelectedFormatSim('Fetching info...');
+    setSimStatusLabel("Querying video details from server... Please wait.");
+    setSimStatusColor("text-slate-400");
+    
+    addLog(`[thread-1] Spawning fetch worker thread...`);
+    addLog(`[thread-1] Executing: yt-dlp --extract-info --download-false "${simulatorUrl}"`);
 
-    // Simulate network latency
+    // Simulate network delay
     setTimeout(() => {
-      // Check if it's DRM site
-      const isDRM = simulatorUrl.toLowerCase().includes('netflix.com') || 
-                    simulatorUrl.toLowerCase().includes('hulu.com') ||
-                    simulatorUrl.toLowerCase().includes('disneyplus.com') ||
-                    simulatorUrl.toLowerCase().includes('hbo.com');
-
-      if (isDRM) {
-        addLog('WARNING: Site relies on DRM-protected streaming tokens (Netflix/Hulu).');
-        addLog('ERROR: [DRM Bypass Engine] Ignored/bypassed DRM stream key matching system requirements.');
-        setIsFetchingSim(false);
-        showToast('DRM Error: Netflix/Hulu DRM content is bypassed & ignored per policy constraints.');
-        return;
-      }
-
-      // Find matching preset, else use generic mock info
-      const foundPreset = PRESETS.find(p => simulatorUrl.toLowerCase().includes(p.type)) || {
-        name: 'Generic URL Audio/Video Stream',
+      // Find matching preset, else use a generic mock info
+      const foundPreset = PRESETS.find(p => simulatorUrl.toLowerCase().includes(p.provider.toLowerCase()) || simulatorUrl.toLowerCase().includes(p.url.split('watch?v=')[1]?.slice(0, 4))) || {
+        name: 'Custom User Stream',
         url: simulatorUrl,
-        duration: 254,
-        title: 'Custom Analyzed Online Video stream track',
-        uploader: 'WebMediaGateway',
-        formats: [
-          '1080p - MP4 (Merged Stream)',
-          '720p - MP4 (Merged Stream)',
-          'Best Audio Only - M4A (Audio Only)'
-        ],
-        subtitles: [
-          'No subtitle selected',
-          'en (Native)'
-        ],
-        type: 'youtube' as const
+        subtitleUrl: subtitleUrlSim,
+        title: simulatorUrl.includes('youtube') ? 'A Custom Youtube Video' : 'Generic Web Stream Container',
+        duration: '04:15',
+        provider: 'Generic Extractor',
+        formats: ['1080p - mp4', '720p - mp4', '480p - mp4', 'Best (Default)'],
+        description: 'Dynamic custom input.'
       };
 
-      setSimMetadata(foundPreset as Preset);
-      setSelectedFormatSim((foundPreset as Preset).formats[0]);
-      setSelectedSubtitleSim((foundPreset as Preset).subtitles?.[0] || 'No subtitle selected');
+      setFetchedMetadataSim(foundPreset);
+      setIsFormatMenuEnabled(true);
+      setSelectedFormatSim(foundPreset.formats[0]);
       setIsFetchingSim(false);
-      addLog(`[info] Title parsed successfully: "${foundPreset.title}"`);
-      addLog(`[info] Extractor found: ${foundPreset.uploader} (${foundPreset.duration ? foundPreset.duration + ' seconds' : 'Live stream'})`);
-      addLog(`[info] Available formats and subtitles extracted successfully.`);
-    }, 1200);
+      
+      setSimStatusLabel(`Parsed ${foundPreset.formats.length} formats. Video Title: '${foundPreset.title}'`);
+      setSimStatusColor("text-green-400");
+      
+      addLog(`[thread-1] Title parsed successfully: "${foundPreset.title}"`);
+      addLog(`[thread-1] Extractor provider: ${foundPreset.provider} | Duration: ${foundPreset.duration}`);
+      addLog(`[thread-1] Worker completed. Populating CTkOptionMenu dropdown.`);
+    }, 1500);
   };
 
-  // Run simulated media download
+  // Run simulated media download (Phase 2)
   const handleSimDownload = () => {
-    if (!simMetadata) return;
-    setIsDownloadingSim(true);
-    setSimProgress(0);
-    setSimSpeed('0 KB/s');
-    setSimEta('Calculating...');
-    addLog(`[download] Starting format pipeline for format query: ${selectedFormatSim}`);
-    if (selectedSubtitleSim !== 'No subtitle selected') {
-      addLog(`[download] Activating subtitle downloader track: ${selectedSubtitleSim}`);
+    if (!fetchedMetadataSim) {
+      addLog('ERROR: Format dictionary not found. You must Fetch Video Formats first!');
+      return;
     }
     
-    const finalName = customVideoNameSim.trim() ? customVideoNameSim.trim() : simMetadata.title;
-    if (customVideoNameSim.trim()) {
-      addLog(`[download] Configuring custom filename output: ${customVideoNameSim}.mkv`);
+    setIsDownloadingSim(true);
+    setSimProgress(0);
+    setSimStatusLabel("Initializing download pipeline...");
+    setSimStatusColor("text-blue-400");
+    
+    addLog(`[thread-2] Spawning downloader daemon thread...`);
+    addLog(`[thread-2] Configured format selector query: ${selectedFormatSim}`);
+    
+    const finalName = customFilenameSim.trim() ? customFilenameSim.trim() : fetchedMetadataSim.title;
+    if (customFilenameSim.trim()) {
+      addLog(`[thread-2] Configuring custom filename option: ${customFilenameSim}`);
     }
-    addLog(`[download] Saving output file to directory: ${simSaveDir}`);
-    addLog(`[download] Destination file template: ${finalName}.mkv`);
 
     let progressValue = 0;
-    const speedOptions = ['4.2 MB/s', '5.1 MB/s', '3.8 MB/s', '4.9 MB/s', '5.5 MB/s', '2.1 MB/s'];
-    const totalSize = simMetadata.duration === 0 ? 'Live Stream Buffer' : '48.5 MB';
-    setSimSize(totalSize);
+    const speedOptions = ['4.5 MB/s', '5.2 MB/s', '3.9 MB/s', '4.8 MB/s', '5.1 MB/s'];
+    const hasSubtitleFilled = subtitleUrlSim.trim().length > 0;
 
     const interval = setInterval(() => {
-      progressValue += Math.floor(Math.random() * 15) + 5;
+      progressValue += Math.floor(Math.random() * 15) + 8;
+      
       if (progressValue >= 100) {
         progressValue = 100;
-        setSimProgress(100);
-        setSimSpeed('Finished');
-        setSimEta('Done');
-        setIsDownloadingSim(false);
-        addLog(`[download] 100% of ${totalSize} downloaded successfully.`);
-        if (selectedSubtitleSim !== 'No subtitle selected') {
-          addLog(`[ffmpeg] Muxing video, audio, and subtitle [${selectedSubtitleSim}] into final container...`);
+        setSimProgress(1.0);
+        clearInterval(interval);
+        
+        addLog(`[thread-2] Video track downloaded: 100.0% done.`);
+        
+        if (hasSubtitleFilled) {
+          // Condition B: Video + Subtitle
+          setSimStatusLabel("Fetching subtitle track from URL...");
+          setSimStatusColor("text-amber-400");
+          addLog(`[thread-2] [Condition B] Subtitle URL is FILLED: "${subtitleUrlSim}"`);
+          addLog(`[thread-2] Initiating HTTP GET request via requests library...`);
+          
+          setTimeout(() => {
+            addLog(`[thread-2] Subtitle GET request completed with HTTP 200 OK.`);
+            addLog(`[thread-2] Saved temporary subtitle file locally as "temp_subs.vtt"`);
+            setSimStatusLabel("Muxing video & subtitle with FFmpeg...");
+            setSimStatusColor("text-amber-400");
+            addLog(`[thread-2] Invoking FFmpeg subprocess command...`);
+            
+            const subCodec = 'srt';
+            const tempVideoFile = `${finalName.toLowerCase().replace(/\s+/g, '_')}.mp4`;
+            const finalMuxedFile = `${finalName.toLowerCase().replace(/\s+/g, '_')}.mkv`;
+            addLog(`[ffmpeg] Executing: ffmpeg -y -i ${tempVideoFile} -i temp_subs.vtt -c copy -c:s ${subCodec} -metadata:s:s:0 language=eng ${finalMuxedFile}`);
+            
+            setTimeout(() => {
+              addLog(`[ffmpeg] Muxing complete. Generated final package: "${finalMuxedFile}"`);
+              addLog(`[thread-2] Removing temporary file: "temp_subs.vtt" removed.`);
+              addLog(`[thread-2] Removing un-muxed raw video: "${tempVideoFile}" removed.`);
+              
+              setSimStatusLabel(`Download complete! Saved as '${finalMuxedFile}'`);
+              setSimStatusColor("text-green-400");
+              setIsDownloadingSim(false);
+              addLog(`[system] SUCCESS: Download & soft-embedding pipeline executed flawlessly.`);
+              alert(`Success! Saved with embedded subtitles as: ${finalMuxedFile}`);
+            }, 1200);
+            
+          }, 1000);
+          
         } else {
-          addLog(`[ffmpeg] Stream tracks located. Triggering video & audio multiplex merging...`);
+          // Condition A: Video Only
+          // Just merging video/audio formats
+          setSimStatusLabel("Video download complete. Merging streams...");
+          addLog(`[thread-2] [Condition A] Subtitle URL is EMPTY. Skipping subtitle process.`);
+          addLog(`[thread-2] yt-dlp merging audio and video tracks into unified container...`);
+          
+          setTimeout(() => {
+            const finalVideoFile = `${finalName.toLowerCase().replace(/\s+/g, '_')}.mp4`;
+            addLog(`[thread-2] Merged output generated: "${finalVideoFile}"`);
+            setSimStatusLabel(`Download complete! Saved as '${finalVideoFile}'`);
+            setSimStatusColor("text-green-400");
+            setIsDownloadingSim(false);
+            addLog(`[system] SUCCESS: Download pipeline executed flawlessly.`);
+            alert(`Success! Video downloaded successfully as: ${finalVideoFile}`);
+          }, 1200);
         }
         
-        setTimeout(() => {
-          addLog(`[ffmpeg] Frame merge complete. Saved inside "${simSaveDir}/${finalName}.mkv"`);
-          addLog(`SUCCESS: Media download sequence completed without error.`);
-          clearInterval(interval);
-        }, 800);
       } else {
-        setSimProgress(progressValue);
+        const pct = progressValue / 100;
+        setSimProgress(pct);
         const randomSpeed = speedOptions[Math.floor(Math.random() * speedOptions.length)];
-        setSimSpeed(randomSpeed);
-        const remainingSeconds = Math.max(1, Math.round(((100 - progressValue) / 10)));
-        setSimEta(`00:${remainingSeconds < 10 ? '0' + remainingSeconds : remainingSeconds}`);
-        addLog(`[download] ${progressValue.toFixed(1)}% completed at speed ${randomSpeed}`);
+        const remainingSeconds = Math.max(1, Math.round(((100 - progressValue) / 12)));
+        const etaStr = `00:${remainingSeconds < 10 ? '0' + remainingSeconds : remainingSeconds}`;
+        
+        setSimStatusLabel(`Downloading: ${progressValue.toFixed(0)}% | Speed: ${randomSpeed} | ETA: ${etaStr}`);
+        setSimStatusColor("text-blue-400");
+        addLog(`[thread-2] Progress: ${progressValue.toFixed(1)}% | Speed: ${randomSpeed} | ETA: ${etaStr}`);
       }
-    }, 500);
-  };
-
-  // Command line builder
-  const generatedCliCommand = `yt-dlp ${
-    cliFormat === 'audio' 
-      ? '-x --audio-format mp3 --audio-quality 192K' 
-      : `-f "bestvideo[height<=${cliRes}]+bestaudio/best"`
-  }${
-    cliSubtitles ? ' --write-subs --sub-langs "en,es"' : ''
-  }${
-    cliThumbnail ? ' --write-thumbnail' : ''
-  } --merge-output-format mp4 -o "~/Downloads/%(title)s.%(ext)s" "${cliUrl || 'https://...'}"`;
-
-  const handleCopyCli = () => {
-    navigator.clipboard.writeText(generatedCliCommand);
-    setCopiedCli(true);
-    showToast("Successfully copied shell command to clipboard!");
-    setTimeout(() => setCopiedCli(false), 2000);
+    }, 400);
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-emerald-500 selection:text-slate-950">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none antialiased">
       
-      {/* Toast Notification overlay */}
+      {/* Dynamic Toast Alerts */}
       {toastMessage && (
-        <div className="fixed top-24 right-6 z-[100] bg-slate-900 border border-emerald-500/30 text-emerald-400 font-medium px-4 py-3 rounded-xl shadow-2xl shadow-emerald-500/10 flex items-center gap-2.5 transition-all animate-fade-in">
-          <Check className="w-4 h-4 text-emerald-400" />
-          <span className="text-xs text-slate-200">{toastMessage}</span>
+        <div className="fixed bottom-6 right-6 z-50 bg-slate-900 border border-emerald-500/30 text-emerald-400 px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2.5 animate-bounce font-medium text-xs">
+          <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+          <span>{toastMessage}</span>
         </div>
       )}
-      
-      {/* Premium Header */}
-      <header className="border-b border-slate-800 bg-slate-900/60 backdrop-blur-xl sticky top-0 z-50 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="bg-emerald-500 p-2.5 rounded-xl text-slate-950 shadow-lg shadow-emerald-500/20">
-            <Cpu className="w-5 h-5 stroke-[2.5]" />
+
+      {/* Hero Header Segment */}
+      <header className="border-b border-slate-800 bg-slate-950 px-6 py-5 shrink-0">
+        <div className="max-w-7xl w-full mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl">
+              <Download className="w-6 h-6 animate-pulse" />
+            </div>
+            <div>
+              <h1 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+                Universal Video Downloader Playground
+                <span className="text-[9px] bg-slate-800 text-slate-400 border border-slate-700 px-1.5 py-0.5 rounded font-mono uppercase font-normal">v1.2.0</span>
+              </h1>
+              <p className="text-xs text-slate-400 mt-0.5">Interactive CustomTkinter GUI emulator, source builder, and FFmpeg multiplexer</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-lg font-bold tracking-tight text-white flex items-center gap-2">
-              Universal Video Downloader
-              <span className="text-xs font-normal bg-slate-800 text-slate-400 border border-slate-700 px-2 py-0.5 rounded-full">v1.0.0</span>
-            </h1>
-            <p className="text-xs text-slate-400">Desktop Python CustomTkinter Application & yt-dlp Tool Suite</p>
+
+          <div className="flex items-center gap-3">
+            <button
+              id="download-btn-header"
+              onClick={handleDownloadPyScript}
+              className="bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-800 hover:border-slate-700 text-xs font-semibold px-3.5 py-2 rounded-lg flex items-center gap-2 transition-all cursor-pointer shadow-md"
+            >
+              <FileCode className="w-4 h-4 text-emerald-400" />
+              Get `downloader.py`
+            </button>
+            <a 
+              href="https://github.com/yt-dlp/yt-dlp" 
+              target="_blank" 
+              rel="noreferrer"
+              className="bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 text-xs font-semibold px-3.5 py-2 rounded-lg flex items-center gap-1.5 transition-all"
+            >
+              yt-dlp Docs
+              <Globe className="w-3.5 h-3.5" />
+            </a>
           </div>
-        </div>
-        
-        {/* Actions */}
-        <div className="flex items-center gap-3">
-          <button 
-            id="header-download-btn"
-            onClick={handleDownloadPyScript}
-            className="flex items-center gap-2 text-xs bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold px-4 py-2 rounded-lg transition-all active:scale-95 shadow-md shadow-emerald-500/10 cursor-pointer"
-          >
-            <Download className="w-4 h-4" />
-            Download python script
-          </button>
         </div>
       </header>
 
-      {/* Main Workspace */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
+      {/* Main Container Section */}
+      <main className="flex-1 max-w-7xl w-full mx-auto p-6 flex flex-col gap-6 overflow-hidden">
         
-        {/* Tab Controls for entire screen workspace */}
-        <div className="col-span-12 flex flex-wrap gap-2 border-b border-slate-800 pb-2">
+        {/* Navigation Tabs Bar */}
+        <div className="flex border-b border-slate-800/80 gap-2 shrink-0">
           <button
             id="tab-emulator"
             onClick={() => setActiveTab('emulator')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all cursor-pointer ${
+            className={`flex items-center gap-2 px-5 py-3 rounded-t-lg text-xs font-bold tracking-wider uppercase transition-all cursor-pointer ${
               activeTab === 'emulator' 
-                ? 'bg-slate-800 text-emerald-400 border border-slate-700 shadow-inner' 
-                : 'text-slate-400 hover:text-white hover:bg-slate-900'
+                ? 'bg-slate-900 text-emerald-400 border-t-2 border-emerald-500 border-x border-slate-800' 
+                : 'text-slate-400 hover:text-white hover:bg-slate-900/40'
             }`}
           >
             <Laptop className="w-4 h-4" />
-            Interactive Desktop Emulator
+            Interactive GUI Emulator
           </button>
           
           <button
             id="tab-code"
             onClick={() => setActiveTab('code')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all cursor-pointer ${
+            className={`flex items-center gap-2 px-5 py-3 rounded-t-lg text-xs font-bold tracking-wider uppercase transition-all cursor-pointer ${
               activeTab === 'code' 
-                ? 'bg-slate-800 text-emerald-400 border border-slate-700 shadow-inner' 
-                : 'text-slate-400 hover:text-white hover:bg-slate-900'
+                ? 'bg-slate-900 text-emerald-400 border-t-2 border-emerald-500 border-x border-slate-800' 
+                : 'text-slate-400 hover:text-white hover:bg-slate-900/40'
             }`}
           >
             <Code className="w-4 h-4" />
@@ -1120,340 +811,199 @@ export default function App() {
           </button>
 
           <button
-            id="tab-commands"
-            onClick={() => setActiveTab('commands')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all cursor-pointer ${
-              activeTab === 'commands' 
-                ? 'bg-slate-800 text-emerald-400 border border-slate-700 shadow-inner' 
-                : 'text-slate-400 hover:text-white hover:bg-slate-900'
-            }`}
-          >
-            <Terminal className="w-4 h-4" />
-            CLI yt-dlp Command Generator
-          </button>
-
-          <button
             id="tab-setup"
             onClick={() => setActiveTab('setup')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all cursor-pointer ${
+            className={`flex items-center gap-2 px-5 py-3 rounded-t-lg text-xs font-bold tracking-wider uppercase transition-all cursor-pointer ${
               activeTab === 'setup' 
-                ? 'bg-slate-800 text-emerald-400 border border-slate-700 shadow-inner' 
-                : 'text-slate-400 hover:text-white hover:bg-slate-900'
+                ? 'bg-slate-900 text-emerald-400 border-t-2 border-emerald-500 border-x border-slate-800' 
+                : 'text-slate-400 hover:text-white hover:bg-slate-900/40'
             }`}
           >
             <HelpCircle className="w-4 h-4" />
-            Installation & Setup Guide
+            Setup & Execution Guide
           </button>
         </div>
 
-        {/* Content Tabs Switcher */}
-        <div className="col-span-12 lg:col-span-12 grid grid-cols-1 lg:grid-cols-12 gap-6">
-          
-          {/* EMULATOR TAB VIEW */}
+        {/* Tab Contents */}
+        <div className="flex-1 grid grid-cols-12 gap-6 overflow-y-auto">
+
+          {/* TAB 1: INTERACTIVE DESKTOP EMULATOR */}
           {activeTab === 'emulator' && (
             <>
-              {/* Left Column: Interactive App Emulator Mockup */}
-              <div className="lg:col-span-7 flex flex-col gap-4">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-md font-semibold text-slate-300 flex items-center gap-2">
-                    <span>Live GUI Simulation Workspace</span>
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                  </h2>
-                  <p className="text-xs text-slate-500">Simulates real background threads & yt-dlp callbacks</p>
+              {/* Left Side: Mock CustomTkinter Window */}
+              <div className="col-span-12 lg:col-span-7 flex flex-col gap-4">
+                
+                <div className="flex items-center justify-between px-1">
+                  <span className="text-xs font-bold uppercase tracking-widest text-slate-400 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+                    Live App Mockup Frame
+                  </span>
+                  <span className="text-xs text-slate-500 font-mono">Simulated Multi-Threaded Process</span>
                 </div>
 
-                {/* Desktop Shell container */}
-                <div id="desktop-emulator-frame" className="border border-slate-800 rounded-xl bg-slate-900/90 shadow-2xl shadow-black overflow-hidden flex flex-col">
+                {/* Simulated CustomTkinter Desktop Window */}
+                <div className="border border-slate-800 rounded-xl bg-slate-950 shadow-2xl flex flex-col overflow-hidden max-w-[640px] mx-auto w-full">
                   
-                  {/* OS Chrome Header */}
-                  <div className="bg-slate-950 px-4 py-3 border-b border-slate-800 flex items-center justify-between">
+                  {/* OS Titlebar */}
+                  <div className="bg-slate-900 px-4 py-2.5 border-b border-slate-800 flex items-center justify-between">
                     <div className="flex items-center gap-1.5">
-                      <span className="w-3 h-3 rounded-full bg-red-500/95 inline-block"></span>
-                      <span className="w-3 h-3 rounded-full bg-yellow-500/95 inline-block"></span>
-                      <span className="w-3 h-3 rounded-full bg-green-500/95 inline-block"></span>
+                      <span className="w-3 h-3 rounded-full bg-red-500/80 inline-block"></span>
+                      <span className="w-3 h-3 rounded-full bg-yellow-500/80 inline-block"></span>
+                      <span className="w-3 h-3 rounded-full bg-green-500/80 inline-block"></span>
                     </div>
-                    <div className="text-xs text-slate-400 font-mono flex items-center gap-1.5 bg-slate-900 px-3 py-1 rounded-md border border-slate-800">
-                      <Laptop className="w-3 h-3" />
-                      Universal Video Downloader (Python UI Simulator)
-                    </div>
+                    <span className="text-xs font-semibold text-slate-300 select-none">Universal Video Downloader</span>
                     <div className="w-12"></div>
                   </div>
 
-                  {/* Simulator Main Grid */}
-                  <div className="grid grid-cols-1 md:grid-cols-12 min-h-[500px]">
+                  {/* CustomTkinter App Content (Matching exactly the Python code layout!) */}
+                  <div className="p-6 bg-slate-900/40 flex flex-col gap-4 text-slate-200">
                     
-                    {/* Simulator Sidebar Frame */}
-                    <div className="md:col-span-3 bg-slate-950/60 border-r border-slate-800/80 p-4 flex flex-col justify-between">
-                      <div className="flex flex-col gap-4">
-                        <div>
-                          <p className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold mb-1">Downloader App</p>
-                          <h3 className="text-sm font-bold text-white">YTDL Client</h3>
-                          <p className="text-[10px] text-slate-400 italic">CustomTkinter Interface</p>
-                        </div>
-
-                        <div className="border-t border-slate-800/80 pt-3">
-                          <label className="text-[11px] text-slate-400 block mb-1">Theme Accent:</label>
-                          <select 
-                            id="sim-theme-selector"
-                            value={accentColor}
-                            onChange={(e) => setAccentColor(e.target.value)}
-                            className="w-full text-xs bg-slate-900 border border-slate-800 text-slate-300 rounded px-2 py-1.5 font-medium focus:outline-none focus:border-emerald-500"
-                          >
-                            <option value="blue">Blue Accent</option>
-                            <option value="green">Green Accent</option>
-                            <option value="dark-blue">Dark Blue Accent</option>
-                          </select>
-                        </div>
-                      </div>
-
-                      <div className="text-[10px] text-slate-500 bg-slate-900/50 p-2.5 rounded border border-slate-800/40">
-                        <span className="font-semibold text-slate-400 block mb-0.5">FFmpeg Check:</span>
-                        Requires FFmpeg on terminal PATH to merge resolution formats properly.
-                      </div>
+                    {/* App Title inside the CustomTkinter frame */}
+                    <div className="text-center py-2 border-b border-slate-800/60">
+                      <h2 className="text-xl font-bold tracking-tight text-white">Universal Video Downloader</h2>
+                      <span className="text-[10px] text-slate-500 block mt-0.5">Powered by CustomTkinter, yt-dlp & FFmpeg</span>
                     </div>
 
-                    {/* Simulator Content Area */}
-                    <div className="md:col-span-9 p-5 flex flex-col gap-4 overflow-y-auto">
-                      
-                      {/* URL Paste Box */}
-                      <div className="bg-slate-950/40 border border-slate-800/80 rounded-lg p-3 flex flex-col gap-2">
-                        <label className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider">Paste Media Stream Link</label>
-                        <div className="flex gap-2">
-                          <input 
-                            id="sim-url-input"
-                            type="text" 
-                            placeholder="Paste Youtube or HLS (.m3u8) video URL..." 
-                            value={simulatorUrl}
-                            onChange={(e) => setSimulatorUrl(e.target.value)}
-                            className="flex-1 bg-slate-900 border border-slate-800 rounded px-3 py-1.5 text-xs text-slate-200 font-mono focus:outline-none focus:border-emerald-500 placeholder-slate-600"
-                          />
-                          <button 
-                            id="sim-fetch-btn"
-                            onClick={handleSimFetchInfo}
-                            disabled={isFetchingSim || isDownloadingSim}
-                            className={`px-3.5 py-1.5 text-xs font-bold rounded flex items-center gap-1.5 transition-all text-slate-950 cursor-pointer ${
-                              accentColor === 'green' 
-                                ? 'bg-emerald-400 hover:bg-emerald-300' 
-                                : accentColor === 'dark-blue'
-                                  ? 'bg-blue-600 hover:bg-blue-500 text-white'
-                                  : 'bg-sky-400 hover:bg-sky-300'
-                            } disabled:opacity-50`}
-                          >
-                            {isFetchingSim ? (
-                              <>
-                                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                                Analyzing...
-                              </>
-                            ) : (
-                              'Fetch Info'
-                            )}
-                          </button>
-                        </div>
-                      </div>
+                    {/* 1. Video URL Input Area */}
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs font-bold text-slate-300">Video / Stream / HLS URL:</label>
+                      <input 
+                        id="sim-url-input"
+                        type="text"
+                        placeholder="Enter video or HLS playlist URL (e.g., https://...)"
+                        value={simulatorUrl}
+                        onChange={(e) => setSimulatorUrl(e.target.value)}
+                        disabled={isDownloadingSim || isFetchingSim}
+                        className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-1.5 text-xs text-slate-200 font-mono focus:outline-none focus:border-blue-500 disabled:opacity-50"
+                      />
+                    </div>
 
-                      {/* Fetched Info Card */}
-                      <div className="bg-slate-950/40 border border-slate-800/80 rounded-lg p-3.5 flex flex-col gap-2.5">
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <span className="text-[10px] bg-slate-800 border border-slate-700 text-slate-400 px-2 py-0.5 rounded uppercase font-semibold">Metadata Summary</span>
-                          </div>
-                          {simMetadata && (
-                            <span className="text-[11px] text-emerald-400 font-semibold flex items-center gap-1">
-                              <CheckCircle className="w-3 h-3" /> Ready to Download
-                            </span>
-                          )}
-                        </div>
-                        
-                        <div className="grid grid-cols-12 gap-3 mt-1">
-                          <div className="col-span-12 md:col-span-8">
-                            <span className="text-[10px] text-slate-500 block">Video/Stream Title</span>
-                            <span className="text-xs font-bold text-white line-clamp-1">
-                              {simMetadata ? simMetadata.title : 'Title not loaded yet. Paste URL above.'}
-                            </span>
-                          </div>
-                          <div className="col-span-6 md:col-span-2">
-                            <span className="text-[10px] text-slate-500 block">Duration</span>
-                            <span className="text-xs font-semibold text-slate-300">
-                              {simMetadata ? (simMetadata.duration === 0 ? 'Live Stream' : `${Math.floor(simMetadata.duration / 60)}m ${simMetadata.duration % 60}s`) : '--:--'}
-                            </span>
-                          </div>
-                          <div className="col-span-6 md:col-span-2">
-                            <span className="text-[10px] text-slate-500 block">Provider</span>
-                            <span className="text-xs font-semibold text-slate-300">
-                              {simMetadata ? simMetadata.uploader : 'N/A'}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
+                    {/* 2. Fetch Video Formats Button */}
+                    <div className="flex justify-center">
+                      <button
+                        id="sim-fetch-btn"
+                        onClick={handleSimFetchInfo}
+                        disabled={isFetchingSim || isDownloadingSim}
+                        className="bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 text-white font-bold text-xs py-2 px-6 rounded transition-colors duration-150 disabled:text-slate-500 cursor-pointer"
+                      >
+                        {isFetchingSim ? (
+                          <span className="flex items-center gap-2">
+                            <RefreshCw className="w-3 h-3 animate-spin" />
+                            Fetching info...
+                          </span>
+                        ) : "Fetch Video Formats"}
+                      </button>
+                    </div>
 
-                      {/* Download controls */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                        
-                        {/* Format selector */}
-                        <div className="bg-slate-950/40 border border-slate-800/80 rounded-lg p-3 flex flex-col gap-1.5">
-                          <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Select Target Format</label>
-                          <select 
-                            id="sim-format-selector"
-                            disabled={!simMetadata || isDownloadingSim}
-                            value={selectedFormatSim}
-                            onChange={(e) => setSelectedFormatSim(e.target.value)}
-                            className="w-full bg-slate-900 border border-slate-800 text-xs text-slate-300 rounded px-2.5 py-1.5 font-medium focus:outline-none focus:border-emerald-500 disabled:opacity-50"
-                          >
-                            {!simMetadata ? (
-                              <option>Please Fetch Info First</option>
-                            ) : (
-                              simMetadata.formats.map((f, idx) => (
-                                <option key={idx} value={f}>{f}</option>
-                              ))
-                            )}
-                          </select>
-                        </div>
+                    {/* 3. Format Selector OptionMenu */}
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs font-bold text-slate-300">Select Quality Format:</label>
+                      <select
+                        id="sim-format-selector"
+                        disabled={!isFormatMenuEnabled || isDownloadingSim}
+                        value={selectedFormatSim}
+                        onChange={(e) => setSelectedFormatSim(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 text-xs text-slate-300 rounded px-2.5 py-1.5 font-medium focus:outline-none focus:border-blue-500 disabled:opacity-50"
+                      >
+                        {!isFormatMenuEnabled ? (
+                          <option>Fetch formats to enable...</option>
+                        ) : (
+                          fetchedMetadataSim?.formats.map((fmt, idx) => (
+                            <option key={idx} value={fmt}>{fmt}</option>
+                          ))
+                        )}
+                      </select>
+                    </div>
 
-                        {/* Subtitle selector */}
-                        <div className="bg-slate-950/40 border border-slate-800/80 rounded-lg p-3 flex flex-col gap-1.5">
-                          <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Subtitle Mux/Embed</label>
-                          <select 
-                            id="sim-subtitle-selector"
-                            disabled={!simMetadata || isDownloadingSim}
-                            value={selectedSubtitleSim}
-                            onChange={(e) => setSelectedSubtitleSim(e.target.value)}
-                            className="w-full bg-slate-900 border border-slate-800 text-xs text-slate-300 rounded px-2.5 py-1.5 font-medium focus:outline-none focus:border-emerald-500 disabled:opacity-50"
-                          >
-                            {!simMetadata ? (
-                              <option>No subtitles detected</option>
-                            ) : (
-                              (simMetadata.subtitles || ['No subtitle selected']).map((s, idx) => (
-                                <option key={idx} value={s}>{s}</option>
-                              ))
-                            )}
-                          </select>
-                        </div>
+                    {/* 4. Subtitle URL Input Area */}
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs font-bold text-slate-300">Subtitle URL (Optional - handles dynamic PHP/vtt/srt):</label>
+                      <input 
+                        id="sim-subtitle-input"
+                        type="text"
+                        placeholder="e.g., http://example.com/subtitle.php?pid=123 or standard VTT/SRT URL"
+                        value={subtitleUrlSim}
+                        onChange={(e) => setSubtitleUrlSim(e.target.value)}
+                        disabled={isDownloadingSim}
+                        className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-1.5 text-xs text-slate-300 font-mono focus:outline-none focus:border-blue-500 disabled:opacity-50 placeholder:text-slate-600"
+                      />
+                    </div>
 
-                        {/* Custom Filename */}
-                        <div className="bg-slate-950/40 border border-slate-800/80 rounded-lg p-3 flex flex-col gap-1.5">
-                          <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Custom Video Name (Optional)</label>
-                          <input 
-                            id="sim-custom-name-input"
-                            type="text" 
-                            placeholder="Defaults to webpage video title"
-                            value={customVideoNameSim} 
-                            onChange={(e) => setCustomVideoNameSim(e.target.value)}
-                            disabled={isDownloadingSim || !simMetadata}
-                            className="w-full bg-slate-900 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-emerald-500 disabled:opacity-50 font-medium placeholder:text-slate-600"
-                          />
-                        </div>
+                    {/* 5. Custom Filename Input Area */}
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs font-bold text-slate-300">Custom Filename (Optional):</label>
+                      <input 
+                        id="sim-filename-input"
+                        type="text"
+                        placeholder="Leave blank to use the video's original title"
+                        value={customFilenameSim}
+                        onChange={(e) => setCustomFilenameSim(e.target.value)}
+                        disabled={isDownloadingSim}
+                        className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-blue-500 disabled:opacity-50 placeholder:text-slate-600"
+                      />
+                    </div>
 
-                        {/* Save location */}
-                        <div className="bg-slate-950/40 border border-slate-800/80 rounded-lg p-3 flex flex-col gap-1.5">
-                          <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Download Save Directory</label>
-                          <div className="flex gap-1.5">
-                            <input 
-                              id="sim-save-dir-input"
-                              type="text" 
-                              value={simSaveDir} 
-                              onChange={(e) => setSimSaveDir(e.target.value)}
-                              disabled={isDownloadingSim}
-                              className="flex-1 bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-xs text-slate-300 focus:outline-none focus:border-emerald-500 disabled:opacity-50 font-mono"
-                            />
-                            <button 
-                              id="sim-browse-btn"
-                              disabled={isDownloadingSim}
-                              onClick={() => {
-                                const val = prompt("Enter simulated folder location path:", simSaveDir);
-                                if (val) setSimSaveDir(val);
-                              }}
-                              className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[11px] font-medium px-2.5 py-1 rounded disabled:opacity-50 cursor-pointer"
-                            >
-                              Browse
-                            </button>
-                          </div>
-                        </div>
-
-                      </div>
-
-                      {/* Download trigger */}
-                      <button 
+                    {/* 6. Download Button */}
+                    <div className="flex justify-center mt-2">
+                      <button
                         id="sim-download-btn"
                         onClick={handleSimDownload}
-                        disabled={!simMetadata || isDownloadingSim || isFetchingSim}
-                        className={`w-full py-2.5 rounded font-bold text-sm tracking-wide transition-all shadow flex items-center justify-center gap-2 cursor-pointer ${
-                          !simMetadata 
-                            ? 'bg-slate-800 border border-slate-700 text-slate-500 cursor-not-allowed'
-                            : isDownloadingSim
-                              ? 'bg-slate-900 border border-slate-800 text-emerald-500 cursor-wait'
-                              : accentColor === 'green' 
-                                ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/15'
-                                : accentColor === 'dark-blue'
-                                  ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-500/15'
-                                  : 'bg-sky-500 hover:bg-sky-400 text-slate-950 shadow-sky-500/15'
-                        }`}
+                        disabled={!isFormatMenuEnabled || isDownloadingSim}
+                        className="w-64 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 text-white font-bold text-sm py-2 px-6 rounded transition-colors duration-150 disabled:text-slate-500 cursor-pointer shadow-lg"
                       >
-                        <Download className="w-4 h-4" />
-                        {isDownloadingSim ? 'Downloading Stream Frames...' : 'Start GUI Video Download'}
+                        {isDownloadingSim ? "Downloading..." : "Download"}
                       </button>
+                    </div>
 
-                      {/* Live stats */}
-                      <div className="bg-slate-950/60 border border-slate-800/80 rounded-lg p-3">
-                        <div className="flex items-center justify-between mb-1 text-[11px] text-slate-400 font-semibold uppercase tracking-wider">
-                          <span>Progress Meter</span>
-                          <span className="text-white font-bold">{simProgress.toFixed(0)}%</span>
-                        </div>
-                        
-                        <div className="w-full bg-slate-900 rounded-full h-2.5 overflow-hidden border border-slate-800">
-                          <div 
-                            className={`h-full transition-all duration-300 rounded-full ${
-                              accentColor === 'green' ? 'bg-emerald-500' : accentColor === 'dark-blue' ? 'bg-blue-500' : 'bg-sky-400'
-                            }`}
-                            style={{ width: `${simProgress}%` }}
-                          ></div>
-                        </div>
+                    {/* 7. Progress UI (Progress bar and Status label) */}
+                    <div className="flex flex-col gap-2 mt-2 pt-3 border-t border-slate-800/60">
+                      
+                      {/* CTkProgressBar visual */}
+                      <div className="w-full bg-slate-950 rounded-full h-2 overflow-hidden border border-slate-800">
+                        <div 
+                          className="h-full bg-blue-500 transition-all duration-300 rounded-full"
+                          style={{ width: `${simProgress * 100}%` }}
+                        ></div>
+                      </div>
 
-                        <div className="grid grid-cols-3 mt-3 text-center text-xs font-mono border-t border-slate-800/40 pt-2 text-slate-300">
-                          <div className="border-r border-slate-800/50">
-                            <span className="text-[10px] text-slate-500 block uppercase tracking-wider">Speed</span>
-                            <span className="font-bold">{simSpeed}</span>
-                          </div>
-                          <div className="border-r border-slate-800/50">
-                            <span className="text-[10px] text-slate-500 block uppercase tracking-wider">ETA</span>
-                            <span className="font-bold">{simEta}</span>
-                          </div>
-                          <div>
-                            <span className="text-[10px] text-slate-500 block uppercase tracking-wider">File Size</span>
-                            <span className="font-bold">{simSize}</span>
-                          </div>
-                        </div>
+                      {/* CTkLabel status message wrapper */}
+                      <div className="text-center">
+                        <p className={`text-xs font-mono font-medium ${simStatusColor} transition-colors duration-150 leading-relaxed`}>
+                          {simStatusLabel}
+                        </p>
                       </div>
 
                     </div>
 
                   </div>
 
-                  {/* Log console footer */}
-                  <div className="border-t border-slate-800/90 bg-slate-950 p-3">
-                    <div className="flex items-center justify-between px-1 mb-2 text-xs font-semibold text-slate-400">
+                  {/* Live Logger Console Footer */}
+                  <div className="bg-slate-950 border-t border-slate-800 p-4 font-mono text-[11px] text-slate-300 flex flex-col gap-2">
+                    <div className="flex items-center justify-between text-slate-500 text-xs pb-1 border-b border-slate-900">
                       <span className="flex items-center gap-1.5">
                         <Terminal className="w-3.5 h-3.5 text-emerald-400" />
-                        Terminal Diagnostics Log Stream (yt-dlp callback pipe)
+                        Stdout / Multithreading Logger stream (yt-dlp)
                       </span>
                       <button 
                         id="clear-logs-btn"
-                        onClick={() => setSimLogs([])} 
-                        className="text-[10px] text-slate-500 hover:text-slate-300 transition-colors cursor-pointer"
+                        onClick={() => setSimLogs([])}
+                        className="hover:text-slate-200 transition-colors cursor-pointer"
                       >
-                        Clear Terminal
+                        Clear
                       </button>
                     </div>
-
-                    <div className="bg-slate-900/80 rounded border border-slate-800 p-2.5 font-mono text-[11px] text-slate-300 h-28 overflow-y-auto flex flex-col gap-1 select-text">
+                    <div className="h-28 overflow-y-auto flex flex-col gap-1 pr-1 font-semibold select-text">
                       {simLogs.map((log, index) => (
-                        <div key={index} className="leading-relaxed">
-                          <span className="text-slate-500 mr-2">&gt;</span>
+                        <div key={index}>
+                          <span className="text-slate-500 mr-1.5">&gt;</span>
                           <span className={
                             log.includes('SUCCESS') 
-                              ? 'text-emerald-400 font-semibold' 
-                              : log.includes('ERROR') || log.includes('WARNING')
-                                ? 'text-amber-500 font-semibold'
-                                : 'text-slate-300'
+                              ? 'text-emerald-400' 
+                              : log.includes('ERROR')
+                                ? 'text-red-400'
+                                : log.includes('Condition')
+                                  ? 'text-amber-400'
+                                  : 'text-slate-300'
                           }>
                             {log}
                           </span>
@@ -1464,82 +1014,86 @@ export default function App() {
                   </div>
 
                 </div>
+
               </div>
 
-              {/* Right Column: Simulator Presets & Info Cards */}
-              <div className="lg:col-span-5 flex flex-col gap-6">
+              {/* Right Side: Presets Selector & Condition Guides */}
+              <div className="col-span-12 lg:col-span-5 flex flex-col gap-5">
                 
-                {/* Simulator Presets Selection */}
+                {/* Emulator Preset selectors */}
                 <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-5 flex flex-col gap-4">
                   <div>
-                    <h3 className="font-bold text-white text-md flex items-center gap-1.5">
+                    <h3 className="font-bold text-white text-sm flex items-center gap-2">
                       <Layers className="w-4 h-4 text-emerald-400" />
-                      Emulator URL Presets
+                      Emulator Presets (Condition Testing)
                     </h3>
-                    <p className="text-xs text-slate-400 mt-1">Select pre-configured source links to witness various downloader outcomes:</p>
+                    <p className="text-xs text-slate-400 mt-1">Select a preset to test different code condition paths instantly in the mockup:</p>
                   </div>
 
-                  <div className="flex flex-col gap-2">
-                    {PRESETS.map((p, idx) => (
-                      <button
-                        key={idx}
-                        onClick={() => handleSelectPreset(p)}
-                        className={`w-full p-3 rounded-lg border text-left flex items-center justify-between transition-all hover:bg-slate-800 group cursor-pointer ${
-                          simulatorUrl === p.url 
-                            ? 'bg-slate-800 border-slate-600 text-white shadow-md' 
-                            : 'bg-slate-950/40 border-slate-800/80 text-slate-400'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="p-2 bg-slate-900 border border-slate-800 rounded group-hover:border-slate-700">
-                            {p.icon}
+                  <div className="flex flex-col gap-2.5">
+                    {PRESETS.map((p, idx) => {
+                      const isSelected = simulatorUrl === p.url && subtitleUrlSim === p.subtitleUrl;
+                      return (
+                        <button
+                          key={idx}
+                          id={`preset-btn-${idx}`}
+                          onClick={() => handleSelectPreset(p)}
+                          className={`w-full p-3.5 rounded-lg border text-left flex flex-col gap-1.5 transition-all hover:bg-slate-800/50 group cursor-pointer ${
+                            isSelected 
+                              ? 'bg-slate-800 border-blue-500/50 text-white shadow-md' 
+                              : 'bg-slate-950/40 border-slate-800 text-slate-400 hover:text-slate-300'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between w-full">
+                            <span className="text-xs font-bold text-slate-200 group-hover:text-blue-400 transition-colors flex items-center gap-2">
+                              {p.provider === 'YouTube' ? <Video className="w-3.5 h-3.5 text-red-500" /> : p.provider === 'Vimeo' ? <Play className="w-3.5 h-3.5 text-sky-400" /> : <Globe className="w-3.5 h-3.5 text-blue-400" />}
+                              {p.name}
+                            </span>
+                            <span className="text-[10px] font-mono bg-slate-900 border border-slate-800 px-1.5 py-0.5 rounded text-slate-500">
+                              {p.provider}
+                            </span>
                           </div>
-                          <div>
-                            <span className="text-xs font-semibold block text-slate-200">{p.name}</span>
-                            <span className="text-[10px] text-slate-500 font-mono block truncate max-w-[200px] sm:max-w-[300px]">{p.url}</span>
-                          </div>
-                        </div>
-                        <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-slate-300 transition-transform group-hover:translate-x-0.5" />
-                      </button>
-                    ))}
-                  </div>
-
-                  <div className="bg-emerald-500/5 border border-emerald-500/10 rounded-lg p-3 flex gap-3 text-xs leading-relaxed text-slate-300">
-                    <Info className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                    <div>
-                      <strong className="text-emerald-400">Multi-threaded Design:</strong> Both metadata parsing and download cycles run as distinct background workers, preserving main GUI events so mouse drags, selections, and theme color transitions never stutter or experience locks.
-                    </div>
+                          <p className="text-[11px] text-slate-400 leading-relaxed group-hover:text-slate-300">
+                            {p.description}
+                          </p>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 
-                {/* Quick Info & Features block */}
+                {/* Condition Boundary Block Explanation */}
                 <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-5 flex flex-col gap-4">
-                  <h3 className="font-bold text-white text-md">Feature Integration Overview</h3>
+                  <h3 className="font-bold text-white text-sm flex items-center gap-1.5">
+                    <Info className="w-4 h-4 text-blue-400" />
+                    How the Core Execution Logic Handles Conditions:
+                  </h3>
                   
-                  <div className="grid grid-cols-1 gap-3 text-xs">
-                    <div className="p-3 bg-slate-950/40 rounded-lg border border-slate-800/80">
-                      <h4 className="font-bold text-slate-200 mb-1 flex items-center gap-1.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                        Asynchronous yt-dlp API Core
-                      </h4>
-                      <p className="text-slate-400">Taps into python's standard sub-threading framework, safely calling the native <code className="text-emerald-400 font-mono">yt_dlp.YoutubeDL</code> engine while streaming real-time status output.</p>
+                  <div className="flex flex-col gap-3 text-xs leading-relaxed">
+                    
+                    <div className="p-3 bg-slate-950/40 rounded-lg border border-slate-800">
+                      <div className="flex items-center justify-between font-bold text-slate-200 mb-1">
+                        <span>Condition A: Subtitle URL is EMPTY</span>
+                        <span className="text-[9px] bg-blue-500/15 text-blue-400 px-1.5 py-0.5 rounded uppercase font-mono">Video Only</span>
+                      </div>
+                      <p className="text-slate-400 text-[11px]">
+                        The Python script invokes <code className="text-blue-400 font-mono text-[10px]">yt-dlp</code> directly, applying your selected format dropdown resolution and saving the downloaded streams cleanly into a standard video wrapper.
+                      </p>
                     </div>
 
-                    <div className="p-3 bg-slate-950/40 rounded-lg border border-slate-800/80">
-                      <h4 className="font-bold text-slate-200 mb-1 flex items-center gap-1.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                        Unified Progress Hooks
-                      </h4>
-                      <p className="text-slate-400">Converts technical raw block buffers and stream callbacks into readable percentage fractions, human-friendly download speed metrics (e.g. MB/s), and calculated time predictions (ETA).</p>
+                    <div className="p-3 bg-slate-950/40 rounded-lg border border-slate-800">
+                      <div className="flex items-center justify-between font-bold text-slate-200 mb-1">
+                        <span>Condition B: Subtitle URL is FILLED</span>
+                        <span className="text-[9px] bg-amber-500/15 text-amber-400 px-1.5 py-0.5 rounded uppercase font-mono">Video + Subs</span>
+                      </div>
+                      <p className="text-slate-400 text-[11px]">
+                        1. Downloads the video track using yt-dlp first.<br />
+                        2. Fetches the subtitle web text content from the URL via `requests.get()`. Saves locally as <code className="text-amber-400 font-mono text-[10px]">temp_subs.vtt</code>.<br />
+                        3. Spawns an <code className="text-emerald-400 font-mono text-[10px]">ffmpeg</code> command to soft-embed the subtitle file into a single `.mkv` container without re-encoding.<br />
+                        4. Deletes <code className="text-slate-300 font-mono text-[10px]">temp_subs.vtt</code> to leave a clean folder structure.
+                      </p>
                     </div>
 
-                    <div className="p-3 bg-slate-950/40 rounded-lg border border-slate-800/80">
-                      <h4 className="font-bold text-slate-200 mb-1 flex items-center gap-1.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                        DRM Content Safety Bypass
-                      </h4>
-                      <p className="text-slate-400">Strict safety protocols bypass DRM encryption layers (such as Widevine, FairPlay) gracefully reporting error alerts instead of leading to script crashes.</p>
-                    </div>
                   </div>
                 </div>
 
@@ -1547,61 +1101,53 @@ export default function App() {
             </>
           )}
 
-          {/* PYTHON SOURCE CODE TAB VIEW */}
+          {/* TAB 2: PYTHON SOURCE CODE */}
           {activeTab === 'code' && (
             <div className="col-span-12 flex flex-col gap-4">
               
               <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
+                
+                {/* Header and theme controls */}
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
                   <div>
-                    <h3 className="font-bold text-white text-lg flex items-center gap-2">
+                    <h3 className="font-bold text-white text-md flex items-center gap-2">
                       <FileCode className="w-5 h-5 text-emerald-400" />
                       downloader.py Source Code
                     </h3>
-                    <p className="text-xs text-slate-400 mt-0.5">Customize default parameters live using the generator controls below:</p>
+                    <p className="text-xs text-slate-400 mt-0.5">Below is the complete, modular Python script. Choose a theme configuration to modify the script's theme variable live:</p>
                   </div>
                   
-                  {/* Dynamic Settings */}
-                  <div className="flex flex-wrap items-center gap-4 bg-slate-950/80 border border-slate-800 p-3 rounded-lg">
-                    <div className="flex flex-col gap-1 text-xs">
-                      <span className="text-slate-400">Default Theme Color:</span>
-                      <select 
-                        id="code-theme-selector"
-                        value={accentColor}
-                        onChange={(e) => setAccentColor(e.target.value)}
-                        className="bg-slate-900 border border-slate-800 text-slate-200 text-xs px-2 py-1 rounded"
-                      >
-                        <option value="blue">Blue</option>
-                        <option value="green">Green</option>
-                        <option value="dark-blue">Dark-Blue</option>
-                      </select>
-                    </div>
-                    
-                    <div className="flex flex-col gap-1 text-xs">
-                      <span className="text-slate-400">Default Save Path:</span>
-                      <input 
-                        id="code-save-dir"
-                        type="text" 
-                        value={defaultDir}
-                        onChange={(e) => setDefaultDir(e.target.value)}
-                        className="bg-slate-900 border border-slate-800 text-slate-200 text-xs px-2 py-1 rounded font-mono w-52"
-                      />
-                    </div>
+                  {/* Accent setting */}
+                  <div className="flex items-center gap-3 bg-slate-950 border border-slate-800 p-2.5 rounded-lg">
+                    <span className="text-xs text-slate-400 font-semibold uppercase tracking-wider">CustomTkinter Accent:</span>
+                    <select 
+                      id="theme-accent-selector"
+                      value={accentColor}
+                      onChange={(e) => {
+                        setAccentColor(e.target.value);
+                        addLog(`[UI] Theme changed in generator: ${e.target.value}`);
+                      }}
+                      className="bg-slate-900 border border-slate-800 text-slate-200 text-xs px-2.5 py-1 rounded"
+                    >
+                      <option value="blue">Blue</option>
+                      <option value="green">Green</option>
+                      <option value="dark-blue">Dark-Blue</option>
+                    </select>
                   </div>
                 </div>
 
-                {/* Code Window controls */}
+                {/* Code viewport container */}
                 <div className="bg-slate-950 border border-slate-800 rounded-lg overflow-hidden flex flex-col">
-                  <div className="bg-slate-900 px-4 py-2 flex items-center justify-between border-b border-slate-800">
-                    <span className="text-xs text-slate-400 font-mono">downloader.py (Ready for execution)</span>
+                  <div className="bg-slate-900 px-4 py-2.5 flex items-center justify-between border-b border-slate-800">
+                    <span className="text-xs text-slate-400 font-mono">downloader.py (Production Ready, self-contained)</span>
                     <div className="flex items-center gap-2">
                       <button 
                         id="copy-code-btn"
                         onClick={handleCopyCode}
-                        className="flex items-center gap-1.5 text-xs text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded transition-all cursor-pointer"
+                        className="flex items-center gap-1.5 text-xs text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded transition-all cursor-pointer border border-slate-700"
                       >
                         {copiedCode ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                        {copiedCode ? 'Copied' : 'Copy Code'}
+                        {copiedCode ? 'Copied' : 'Copy Script'}
                       </button>
                       <button 
                         id="download-script-btn"
@@ -1614,168 +1160,8 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="p-4 overflow-x-auto max-h-[600px] overflow-y-auto bg-slate-950 font-mono text-xs leading-relaxed text-slate-300 selection:bg-slate-800">
-                    <pre className="whitespace-pre">{generatePythonCode(accentColor, defaultDir)}</pre>
-                  </div>
-                </div>
-              </div>
-
-            </div>
-          )}
-
-          {/* COMMAND LINE GENERATOR TAB VIEW */}
-          {activeTab === 'commands' && (
-            <div className="col-span-12 flex flex-col gap-6">
-              
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                
-                {/* Form configuration controls */}
-                <div className="lg:col-span-5 bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col gap-5">
-                  <div>
-                    <h3 className="font-bold text-white text-md flex items-center gap-2">
-                      <Settings className="w-4.5 h-4.5 text-emerald-400" />
-                      Configure yt-dlp Settings
-                    </h3>
-                    <p className="text-xs text-slate-400 mt-1">Generate raw terminal arguments for standalone scripts or CLI commands:</p>
-                  </div>
-
-                  <div className="flex flex-col gap-4 text-xs">
-                    
-                    {/* Media URL */}
-                    <div className="flex flex-col gap-1.5">
-                      <label className="text-slate-400 font-semibold uppercase tracking-wider text-[10px]">Media URL:</label>
-                      <input 
-                        id="cli-url-input"
-                        type="text" 
-                        value={cliUrl}
-                        onChange={(e) => setCliUrl(e.target.value)}
-                        placeholder="https://www.youtube.com/..."
-                        className="bg-slate-950 border border-slate-800 rounded px-3 py-2 text-slate-200 focus:outline-none focus:border-emerald-500 font-mono"
-                      />
-                    </div>
-
-                    {/* Mode (Format type) */}
-                    <div className="flex flex-col gap-1.5">
-                      <label className="text-slate-400 font-semibold uppercase tracking-wider text-[10px]">Format Mode:</label>
-                      <div className="grid grid-cols-2 gap-2">
-                        <button
-                          id="cli-fmt-video"
-                          onClick={() => setCliFormat('video')}
-                          className={`py-2 rounded font-semibold border transition-all cursor-pointer ${
-                            cliFormat === 'video' 
-                              ? 'bg-emerald-500/10 border-emerald-500/50 text-emerald-400' 
-                              : 'bg-slate-950/40 border-slate-800 text-slate-400 hover:text-white'
-                          }`}
-                        >
-                          Video + Audio
-                        </button>
-                        <button
-                          id="cli-fmt-audio"
-                          onClick={() => setCliFormat('audio')}
-                          className={`py-2 rounded font-semibold border transition-all cursor-pointer ${
-                            cliFormat === 'audio' 
-                              ? 'bg-emerald-500/10 border-emerald-500/50 text-emerald-400' 
-                              : 'bg-slate-950/40 border-slate-800 text-slate-400 hover:text-white'
-                          }`}
-                        >
-                          Audio Extraction Only
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Quality restriction (if video) */}
-                    {cliFormat === 'video' && (
-                      <div className="flex flex-col gap-1.5">
-                        <label className="text-slate-400 font-semibold uppercase tracking-wider text-[10px]">Max Resolution Constraint:</label>
-                        <select
-                          id="cli-res-select"
-                          value={cliRes}
-                          onChange={(e) => setCliRes(e.target.value)}
-                          className="bg-slate-950 border border-slate-800 rounded p-2 text-slate-300"
-                        >
-                          <option value="2160">2160p (4K UHD)</option>
-                          <option value="1080">1080p (Full HD)</option>
-                          <option value="720">720p (HD)</option>
-                          <option value="480">480p (Standard)</option>
-                        </select>
-                      </div>
-                    )}
-
-                    {/* Checkbox settings */}
-                    <div className="flex flex-col gap-3 mt-1 bg-slate-950/40 border border-slate-800/80 p-3 rounded-lg">
-                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Extra Post-Processors</span>
-                      
-                      <label className="flex items-center gap-2.5 text-slate-300 cursor-pointer select-none">
-                        <input 
-                          id="cli-chk-subs"
-                          type="checkbox" 
-                          checked={cliSubtitles} 
-                          onChange={(e) => setCliSubtitles(e.target.checked)}
-                          className="w-4 h-4 rounded border-slate-800 text-emerald-500 bg-slate-950 accent-emerald-500 focus:ring-0" 
-                        />
-                        <span>Download & Embed Subtitles (English/Spanish)</span>
-                      </label>
-
-                      <label className="flex items-center gap-2.5 text-slate-300 cursor-pointer select-none">
-                        <input 
-                          id="cli-chk-thumbnail"
-                          type="checkbox" 
-                          checked={cliThumbnail} 
-                          onChange={(e) => setCliThumbnail(e.target.checked)}
-                          className="w-4 h-4 rounded border-slate-800 text-emerald-500 bg-slate-950 accent-emerald-500 focus:ring-0" 
-                        />
-                        <span>Extract & Embed Thumbnail Artwork</span>
-                      </label>
-                    </div>
-
-                  </div>
-                </div>
-
-                {/* Live CLI Output Terminal */}
-                <div className="lg:col-span-7 flex flex-col gap-4">
-                  <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col gap-4">
-                    <div>
-                      <h3 className="font-bold text-white text-md">Generated Shell Script</h3>
-                      <p className="text-xs text-slate-400 mt-1">Copy and paste this script directly into your Terminal, PowerShell, or command prompt:</p>
-                    </div>
-
-                    <div className="bg-slate-950 border border-slate-800 rounded-lg overflow-hidden">
-                      <div className="bg-slate-900 px-4 py-2 border-b border-slate-800 flex items-center justify-between">
-                        <span className="text-[11px] font-mono text-slate-400">Terminal Command</span>
-                        <button 
-                          id="copy-cli-btn"
-                          onClick={handleCopyCli}
-                          className="text-xs text-slate-300 hover:text-white flex items-center gap-1 bg-slate-800 hover:bg-slate-700 px-2.5 py-1 rounded transition-colors cursor-pointer"
-                        >
-                          {copiedCli ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                          Copy Command
-                        </button>
-                      </div>
-                      <div className="p-4 font-mono text-xs text-emerald-400 bg-slate-950 leading-relaxed select-all min-h-[140px] break-all">
-                        {generatedCliCommand}
-                      </div>
-                    </div>
-
-                    {/* Pro Tips */}
-                    <div className="bg-slate-950 border border-slate-800/80 p-4 rounded-xl flex flex-col gap-2">
-                      <h4 className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-2">
-                        <Terminal className="w-4 h-4 text-emerald-400" />
-                        Understanding the Command Arguments
-                      </h4>
-                      
-                      <ul className="text-xs text-slate-400 flex flex-col gap-2.5 list-disc pl-4 leading-relaxed mt-1">
-                        <li>
-                          <strong className="text-slate-300 font-mono font-normal bg-slate-900 border border-slate-800/80 px-1.5 py-0.5 rounded">-f &quot;bestvideo+bestaudio...&quot;</strong> : Directs yt-dlp to obtain the highest isolated video frame rate and highest separate audio frequency and merge them together.
-                        </li>
-                        <li>
-                          <strong className="text-slate-300 font-mono font-normal bg-slate-900 border border-slate-800/80 px-1.5 py-0.5 rounded">--merge-output-format mp4</strong> : Invokes the FFmpeg subsystem to merge formats cleanly into an mp4 shell container.
-                        </li>
-                        <li>
-                          <strong className="text-slate-300 font-mono font-normal bg-slate-900 border border-slate-800/80 px-1.5 py-0.5 rounded">-o &quot;%(title)s.%(ext)s&quot;</strong> : Automated output templates which dynamically name the media file according to the parsed online title metadata.
-                        </li>
-                      </ul>
-                    </div>
-
+                  <div className="p-4 overflow-x-auto max-h-[580px] overflow-y-auto bg-slate-950 font-mono text-xs leading-relaxed text-slate-300 select-all selection:bg-slate-800">
+                    <pre className="whitespace-pre">{generatePythonCode(accentColor)}</pre>
                   </div>
                 </div>
 
@@ -1784,36 +1170,38 @@ export default function App() {
             </div>
           )}
 
-          {/* SETUP & TROUBLESHOOTING GUIDE TAB VIEW */}
+          {/* TAB 3: SYSTEM SETUP & PREREQUISITES */}
           {activeTab === 'setup' && (
             <div className="col-span-12 flex flex-col gap-6">
               
               <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
                 
-                {/* Step-by-Step implementation tutorial */}
+                {/* Steps container */}
                 <div className="md:col-span-8 bg-slate-900 border border-slate-800 rounded-xl p-6 flex flex-col gap-6">
                   <div>
-                    <h3 className="font-bold text-white text-lg">System Prerequisites & Launch Guide</h3>
-                    <p className="text-xs text-slate-400 mt-1">Follow these steps carefully to set up your python development environment and launch the CustomTkinter UI applet:</p>
+                    <h3 className="font-bold text-white text-lg">System Prerequisites & Launch Instructions</h3>
+                    <p className="text-xs text-slate-400 mt-1">Execute the following setup sequences to get the downloader script working locally on your personal desktop environment:</p>
                   </div>
 
                   <div className="flex flex-col gap-6">
                     
                     {/* Step 1 */}
                     <div className="flex gap-4">
-                      <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 text-emerald-400 flex items-center justify-center font-bold text-sm shrink-0">
+                      <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 text-blue-400 flex items-center justify-center font-bold text-sm shrink-0">
                         1
                       </div>
                       <div className="flex-1 text-xs">
-                        <h4 className="font-bold text-white text-sm mb-1">Verify Python & Install PIP Packages</h4>
-                        <p className="text-slate-400 leading-relaxed mb-3">Ensure Python (v3.9 or newer) is installed and available on your command shell path. Next, install CustomTkinter and yt-dlp core using the PIP installer:</p>
-                        <div className="bg-slate-950 border border-slate-800 rounded p-2.5 font-mono text-[11px] text-emerald-400 flex items-center justify-between select-all">
-                          <span>pip install customtkinter yt-dlp</span>
+                        <h4 className="font-bold text-white text-sm mb-1">Install PIP Python Packages</h4>
+                        <p className="text-slate-400 leading-relaxed mb-3">
+                          You will need standard python packages. Run this command inside your terminal/command prompt to fetch the core requirements (CustomTkinter UI component, yt-dlp scraping API, and requests library):
+                        </p>
+                        <div className="bg-slate-950 border border-slate-800 rounded p-2.5 font-mono text-[11px] text-blue-400 flex items-center justify-between select-all">
+                          <span>pip install customtkinter yt-dlp requests</span>
                           <button 
                             id="copy-pip-cmd"
                             onClick={() => {
-                              navigator.clipboard.writeText("pip install customtkinter yt-dlp");
-                              showToast("Copied pip install command to clipboard!");
+                              navigator.clipboard.writeText("pip install customtkinter yt-dlp requests");
+                              showToast("Copied pip install command!");
                             }}
                             className="text-slate-400 hover:text-white transition-colors cursor-pointer"
                           >
@@ -1825,32 +1213,33 @@ export default function App() {
 
                     {/* Step 2 */}
                     <div className="flex gap-4 border-t border-slate-800/80 pt-6">
-                      <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 text-emerald-400 flex items-center justify-center font-bold text-sm shrink-0">
+                      <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 text-blue-400 flex items-center justify-center font-bold text-sm shrink-0">
                         2
                       </div>
                       <div className="flex-1 text-xs">
                         <h4 className="font-bold text-white text-sm mb-1 flex items-center gap-2">
                           Install FFmpeg System Dependency
-                          <span className="text-[10px] bg-amber-500/10 border border-amber-500/20 text-amber-500 px-2 py-0.5 rounded uppercase font-semibold">Critical</span>
+                          <span className="text-[10px] bg-amber-500/10 border border-amber-500/20 text-amber-500 px-2 py-0.5 rounded uppercase font-semibold">Required</span>
                         </h4>
                         <p className="text-slate-400 leading-relaxed mb-3">
-                          To successfully stitch high-resolution visual tracks (like 1080p, 4K) with separate audio streams, or to process live HLS playlists, <strong>FFmpeg</strong> is required on your system PATH.
+                          FFmpeg is essential for high quality formats (1080p, 4K) where platforms keep video and audio streams isolated on their servers. yt-dlp utilizes FFmpeg to sew them back together. 
+                          It is also used for soft-embedding subtitle tracks into media packages (Condition B).
                         </p>
                         
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                           <div className="bg-slate-950/40 border border-slate-800 p-3 rounded">
                             <span className="font-bold text-slate-200 block mb-1">macOS (Homebrew)</span>
-                            <code className="text-emerald-400 block font-mono text-[10px] mt-1 select-all bg-slate-950 px-1 py-0.5 rounded">brew install ffmpeg</code>
+                            <code className="text-blue-400 block font-mono text-[10px] mt-1 select-all bg-slate-950 px-1 py-0.5 rounded">brew install ffmpeg</code>
                           </div>
                           
                           <div className="bg-slate-950/40 border border-slate-800 p-3 rounded">
                             <span className="font-bold text-slate-200 block mb-1">Windows (Chocolatey)</span>
-                            <code className="text-emerald-400 block font-mono text-[10px] mt-1 select-all bg-slate-950 px-1 py-0.5 rounded">choco install ffmpeg</code>
+                            <code className="text-blue-400 block font-mono text-[10px] mt-1 select-all bg-slate-950 px-1 py-0.5 rounded">choco install ffmpeg</code>
                           </div>
 
                           <div className="bg-slate-950/40 border border-slate-800 p-3 rounded">
                             <span className="font-bold text-slate-200 block mb-1">Linux (APT)</span>
-                            <code className="text-emerald-400 block font-mono text-[10px] mt-1 select-all bg-slate-950 px-1 py-0.5 rounded">sudo apt install ffmpeg</code>
+                            <code className="text-blue-400 block font-mono text-[10px] mt-1 select-all bg-slate-950 px-1 py-0.5 rounded">sudo apt install ffmpeg</code>
                           </div>
                         </div>
                       </div>
@@ -1858,19 +1247,21 @@ export default function App() {
 
                     {/* Step 3 */}
                     <div className="flex gap-4 border-t border-slate-800/80 pt-6">
-                      <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 text-emerald-400 flex items-center justify-center font-bold text-sm shrink-0">
+                      <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 text-blue-400 flex items-center justify-center font-bold text-sm shrink-0">
                         3
                       </div>
                       <div className="flex-1 text-xs">
-                        <h4 className="font-bold text-white text-sm mb-1">Launch Downloader Application</h4>
-                        <p className="text-slate-400 leading-relaxed mb-3">Save the compiled python script inside your working directory as <code className="text-emerald-400 font-mono">downloader.py</code> and execute using the shell terminal:</p>
-                        <div className="bg-slate-950 border border-slate-800 rounded p-2.5 font-mono text-[11px] text-emerald-400 flex items-center justify-between select-all">
+                        <h4 className="font-bold text-white text-sm mb-1">Execute the App</h4>
+                        <p className="text-slate-400 leading-relaxed mb-3">
+                          Save the script inside a file named <code className="text-blue-400 font-mono">downloader.py</code> and execute it using the python interpreter inside your terminal:
+                        </p>
+                        <div className="bg-slate-950 border border-slate-800 rounded p-2.5 font-mono text-[11px] text-blue-400 flex items-center justify-between select-all">
                           <span>python downloader.py</span>
                           <button 
                             id="copy-run-cmd"
                             onClick={() => {
                               navigator.clipboard.writeText("python downloader.py");
-                              showToast("Copied python launch command to clipboard!");
+                              showToast("Copied python command!");
                             }}
                             className="text-slate-400 hover:text-white transition-colors cursor-pointer"
                           >
@@ -1883,41 +1274,50 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Right Column: Troubleshooting FAQS & DRM Warnings */}
+                {/* Right side helper FAQs */}
                 <div className="md:col-span-4 flex flex-col gap-6">
                   
-                  {/* FAQs */}
-                  <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col gap-4">
-                    <h3 className="font-bold text-white text-md">FAQ & Troubleshooting</h3>
+                  {/* FAQS card */}
+                  <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-5 flex flex-col gap-4">
+                    <h3 className="font-bold text-white text-sm flex items-center gap-1.5">
+                      <FileText className="w-4 h-4 text-blue-400" />
+                      Downloader Q&A
+                    </h3>
                     
                     <div className="flex flex-col gap-3 text-xs leading-relaxed">
                       
-                      <div className="border-b border-slate-800/80 pb-3">
-                        <strong className="text-slate-200 block mb-1">Why do I get &quot;Unsupported URL&quot; errors?</strong>
-                        <span className="text-slate-400 block">Ensure that `yt-dlp` is fully updated. Major streaming platforms frequently update their API layouts. Run <code className="text-emerald-400 font-mono">pip install -U yt-dlp</code> in your console to apply the newest updates.</span>
+                      <div className="border-b border-slate-800 pb-3">
+                        <strong className="text-slate-200 block mb-1">Why is my subtitle merge file mkv?</strong>
+                        <span className="text-slate-400 block">
+                          The Matroska container (.mkv) supports embedding WebVTT or SRT soft subtitles seamlessly without needing to re-encode the audio/video streams, resulting in near-instant processing.
+                        </span>
                       </div>
 
-                      <div className="border-b border-slate-800/80 pb-3">
-                        <strong className="text-slate-200 block mb-1">Can I download private playlists?</strong>
-                        <span className="text-slate-400 block">Yes. Add your account credentials or export and pass standard netscape cookie formats to the Options dictionary inside the Python script: <code className="text-emerald-400 font-mono">&apos;cookiefile&apos;: &apos;cookies.txt&apos;</code>.</span>
+                      <div className="border-b border-slate-800 pb-3">
+                        <strong className="text-slate-200 block mb-1">Will this freeze the tkinter UI?</strong>
+                        <span className="text-slate-400 block">
+                          No! Both "Fetch Video Formats" and "Download" events launch distinct background daemon threads (<code className="text-blue-400 font-mono text-[10px]">threading.Thread</code>) so your desktop GUI remains responsive.
+                        </span>
                       </div>
 
                       <div>
-                        <strong className="text-slate-200 block mb-1">Why are audio tracks missing?</strong>
-                        <span className="text-slate-400 block">High quality streams keep audio and video isolated. If `ffmpeg` is missing on your path, yt-dlp cannot stitch them, resulting in video-only tracks. Install FFmpeg to enable auto-merges.</span>
+                        <strong className="text-slate-200 block mb-1">How can I update my local yt-dlp?</strong>
+                        <span className="text-slate-400 block">
+                          Platforms update their video systems regularly. If downloads start failing, run <code className="text-blue-400 font-mono text-[10px]">pip install -U yt-dlp</code> inside your terminal to upgrade.
+                        </span>
                       </div>
 
                     </div>
                   </div>
 
-                  {/* Policy Warnings */}
-                  <div className="bg-amber-500/5 border border-amber-500/20 rounded-xl p-5 flex flex-col gap-3">
+                  {/* Policy and safety card */}
+                  <div className="bg-blue-500/5 border border-blue-500/25 rounded-xl p-5 flex flex-col gap-2.5">
                     <div className="flex items-center gap-2">
                       <AlertTriangle className="w-5 h-5 text-amber-500" />
-                      <h3 className="font-bold text-white text-sm">DRM Content Safety Notice</h3>
+                      <h3 className="font-bold text-white text-xs uppercase tracking-wider">Note on Dynamic php Links</h3>
                     </div>
                     <p className="text-xs text-slate-400 leading-relaxed">
-                      This application implements robust safety controls regarding copy-protected DRM files. Domains utilizing secure streaming tokens (such as Widevine on Netflix, Hulu, Prime Video) are bypassed and ignored. Only public, standard, non-encrypted streaming streams can be parsed.
+                      Our custom subtitle getter downloads the subtitle file as raw string text from any URL before saving locally. This guarantees that dynamic endpoints containing URL query arguments (such as <code className="text-slate-300 font-mono text-[10px]">?pid=123</code>) can be parsed cleanly.
                     </p>
                   </div>
 
@@ -1933,14 +1333,14 @@ export default function App() {
       </main>
 
       {/* Elegant minimalist footer */}
-      <footer className="border-t border-slate-800 py-6 mt-12 bg-slate-950 px-6">
-        <div className="max-w-7xl w-full mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
+      <footer className="border-t border-slate-800/80 py-5 bg-slate-950 px-6 shrink-0">
+        <div className="max-w-7xl w-full mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-[11px] text-slate-500">
           <div>
-            <span>Universal Python Video Downloader • Visual Playground v1.0.0</span>
+            <span>Universal Python Video Downloader • Companion Simulator & Builder</span>
           </div>
-          <div className="flex items-center gap-4">
-            <span className="flex items-center gap-1.5"><Cpu className="w-3.5 h-3.5 text-emerald-400" /> Powered by yt-dlp API</span>
-            <span className="flex items-center gap-1.5"><Laptop className="w-3.5 h-3.5 text-blue-400" /> CustomTkinter UI Wrapper</span>
+          <div className="flex items-center gap-4 font-semibold text-slate-400">
+            <span className="flex items-center gap-1.5"><Cpu className="w-3.5 h-3.5 text-emerald-400" /> Python 3 + CustomTkinter GUI</span>
+            <span className="flex items-center gap-1.5"><Laptop className="w-3.5 h-3.5 text-blue-400" /> yt-dlp + requests + FFmpeg</span>
           </div>
         </div>
       </footer>
