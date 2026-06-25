@@ -706,6 +706,8 @@ export default function App() {
   const [simProgress, setSimProgress] = useState<number>(0);
   const [simStatusLabel, setSimStatusLabel] = useState<string>("Ready. Enter a video URL and click 'Fetch Video Formats'.");
   const [simStatusColor, setSimStatusColor] = useState<string>("text-slate-400");
+  const [backendMode, setBackendMode] = useState<'simulated' | 'live'>('simulated');
+  const [backendUrl, setBackendUrl] = useState<string>('http://localhost:5000');
   
   // Terminal diagnostics log streams
   const [simLogs, setSimLogs] = useState<string[]>([
@@ -770,11 +772,43 @@ export default function App() {
   };
 
   // Simulated verification handler
-  const handleSimVerifySubtitle = () => {
+  const handleSimVerifySubtitle = async () => {
     if (!subtitleUrlSim.trim()) {
       addLog('ERROR: Subtitle URL input is empty!');
       setSubtitleStatusLabelSim("❌ Error: Subtitle URL cannot be empty");
       setSubtitleStatusColorSim("text-red-400");
+      return;
+    }
+
+    if (backendMode === 'live') {
+      setIsVerifyingSubSim(true);
+      setSubtitleStatusLabelSim("Verifying via Flask API...");
+      setSubtitleStatusColorSim("text-blue-400");
+      addLog(`[UI] Contacting backend to verify subtitle: ${subtitleUrlSim}`);
+      
+      try {
+        const response = await fetch(`${backendUrl}/api/verify_subtitle?url=${encodeURIComponent(subtitleUrlSim)}`);
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData.error || `HTTP error ${response.status}`);
+        }
+        const data = await response.json();
+        if (data.success) {
+          setIsSubtitleVerifiedSim(true);
+          setSubtitleStatusLabelSim("✅ Subtitle Fetched & Validated!");
+          setSubtitleStatusColorSim("text-green-400");
+          addLog(`[UI] Subtitle check passed! Saved as temp_subs.vtt on local Flask server.`);
+        } else {
+          throw new Error(data.error || "Unknown validation issue");
+        }
+      } catch (err: any) {
+        setIsSubtitleVerifiedSim(false);
+        setSubtitleStatusLabelSim(`❌ Error: ${err.message}`);
+        setSubtitleStatusColorSim("text-red-400");
+        addLog(`[UI] ERROR: Subtitle verification failed: ${err.message}`);
+      } finally {
+        setIsVerifyingSubSim(false);
+      }
       return;
     }
 
@@ -806,11 +840,60 @@ export default function App() {
   };
 
   // Run simulated fetch metadata info (Phase 1)
-  const handleSimFetchInfo = () => {
+  const handleSimFetchInfo = async () => {
     if (!simulatorUrl.trim()) {
       addLog('ERROR: Video URL input is empty!');
       setSimStatusLabel("Error: Enter a valid video URL first!");
       setSimStatusColor("text-red-400");
+      return;
+    }
+
+    if (backendMode === 'live') {
+      setIsFetchingSim(true);
+      setFetchedMetadataSim(null);
+      setIsFormatMenuEnabled(false);
+      setSelectedFormatSim('Fetching info...');
+      setSimStatusLabel("Connecting to Flask API...");
+      setSimStatusColor("text-slate-400");
+      addLog(`[UI] Initiating real metadata fetch to local Flask server: ${backendUrl}/api/fetch`);
+
+      try {
+        const response = await fetch(`${backendUrl}/api/fetch?url=${encodeURIComponent(simulatorUrl)}`);
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData.error || `HTTP error ${response.status}`);
+        }
+        const data = await response.json();
+        
+        const formatsArray = data.formats.map((f: any) => f.label);
+        if (formatsArray.length === 0) {
+          formatsArray.push("Best (Default)");
+        }
+        
+        const fetchedMeta = {
+          title: data.title,
+          formats: formatsArray,
+          description: `Real fetched content from API. Title: "${data.title}"`,
+          url: simulatorUrl,
+          subtitleUrl: subtitleUrlSim,
+          duration: "Unknown",
+          provider: "yt-dlp",
+          name: data.title
+        };
+
+        setFetchedMetadataSim(fetchedMeta);
+        setIsFormatMenuEnabled(true);
+        setSelectedFormatSim(formatsArray[0]);
+        setSimStatusLabel(`Parsed ${formatsArray.length} formats. Title: '${data.title}'`);
+        setSimStatusColor("text-green-400");
+        addLog(`[UI] Success! Fetched Title: "${data.title}"`);
+      } catch (err: any) {
+        setSimStatusLabel(`Flask API Error: ${err.message}`);
+        setSimStatusColor("text-red-400");
+        addLog(`[UI] ERROR: Flask API query failed: ${err.message}`);
+      } finally {
+        setIsFetchingSim(false);
+      }
       return;
     }
 
@@ -856,6 +939,69 @@ export default function App() {
   const handleSimDownload = () => {
     if (!fetchedMetadataSim) {
       addLog('ERROR: Format dictionary not found. You must Fetch Video Formats first!');
+      return;
+    }
+
+    if (backendMode === 'live') {
+      setIsDownloadingSim(true);
+      setSimProgress(0);
+      setSimStatusLabel("Initializing download pipeline...");
+      setSimStatusColor("text-blue-400");
+      addLog(`[UI] Triggering real downloader pipeline via SSE EventSource...`);
+
+      const queryParams = new URLSearchParams({
+        url: simulatorUrl,
+        selected_format: selectedFormatSim,
+        subtitle_url: subtitleUrlSim,
+        sub_mode: subModeSim,
+        target_bitrate: bitrateSim,
+        custom_name: customFilenameSim
+      });
+
+      const sseUrl = `${backendUrl}/api/download?${queryParams.toString()}`;
+      addLog(`[UI] Connecting SSE stream: ${sseUrl}`);
+
+      const eventSource = new EventSource(sseUrl);
+
+      eventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          
+          if (data.type === 'log') {
+            addLog(data.message);
+          } else if (data.type === 'status') {
+            setSimStatusLabel(data.text);
+          } else if (data.type === 'progress') {
+            setSimProgress(data.progress);
+            setSimStatusLabel(data.status);
+          } else if (data.type === 'complete') {
+            setSimProgress(1.0);
+            setSimStatusLabel(`Success! Saved as '${data.filename}'`);
+            setSimStatusColor("text-green-400");
+            setIsDownloadingSim(false);
+            addLog(`[UI] SUCCESS: Stream pipeline complete. File: ${data.filepath}`);
+            alert(`Download successful!\nSaved to: ${data.filepath}`);
+            eventSource.close();
+          } else if (data.type === 'error') {
+            setSimStatusLabel(`Error: ${data.message}`);
+            setSimStatusColor("text-red-400");
+            setIsDownloadingSim(false);
+            addLog(`[UI] PIPELINE ERROR: ${data.message}`);
+            alert(`Download pipeline failed:\n${data.message}`);
+            eventSource.close();
+          }
+        } catch (e: any) {
+          addLog(`[UI] SSE parsing exception: ${e.message}`);
+        }
+      };
+
+      eventSource.onerror = () => {
+        addLog(`[UI] SSE Connection lost or error occurred. Closing stream.`);
+        setSimStatusLabel("Connection failed. Ensure local Flask server is running on port 5000!");
+        setSimStatusColor("text-red-400");
+        setIsDownloadingSim(false);
+        eventSource.close();
+      };
       return;
     }
     
@@ -1148,6 +1294,42 @@ export default function App() {
                   {/* CustomTkinter App Content (Matching exactly the Python code layout!) */}
                   <div className="p-6 bg-slate-900/40 flex flex-col gap-4 text-slate-200">
                     
+                    {/* Backend Connection Bridge Controller */}
+                    <div className="bg-slate-950/80 border border-slate-800/80 rounded-lg p-3 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className={`w-2 h-2 rounded-full ${backendMode === 'live' ? 'bg-emerald-500 animate-pulse' : 'bg-blue-500'}`}></span>
+                        <span className="font-semibold text-slate-300">API Connection Mode:</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 bg-slate-900 p-0.5 rounded border border-slate-800">
+                        <button
+                          type="button"
+                          onClick={() => setBackendMode('simulated')}
+                          className={`px-3 py-1 rounded text-[10px] font-bold transition-all cursor-pointer ${backendMode === 'simulated' ? 'bg-blue-600 text-white shadow-sm font-extrabold' : 'text-slate-400 hover:text-slate-200'}`}
+                        >
+                          🔌 Simulator
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setBackendMode('live')}
+                          className={`px-3 py-1 rounded text-[10px] font-bold transition-all cursor-pointer ${backendMode === 'live' ? 'bg-emerald-600 text-white shadow-sm font-extrabold' : 'text-slate-400 hover:text-slate-200'}`}
+                        >
+                          ⚡ Live API Server
+                        </button>
+                      </div>
+                      {backendMode === 'live' && (
+                        <div className="flex items-center gap-1.5 w-full sm:w-auto">
+                          <span className="text-[10px] text-slate-500 font-bold">HOST:</span>
+                          <input 
+                            type="text"
+                            value={backendUrl}
+                            onChange={(e) => setBackendUrl(e.target.value)}
+                            placeholder="http://localhost:5000"
+                            className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-[10px] text-emerald-400 font-mono w-full sm:w-36 focus:outline-none focus:border-emerald-500"
+                          />
+                        </div>
+                      )}
+                    </div>
+
                     {/* App Title inside the CustomTkinter frame */}
                     <div className="text-center py-2 border-b border-slate-800/60">
                       <h2 className="text-xl font-bold tracking-tight text-white">Universal Video Downloader</h2>
