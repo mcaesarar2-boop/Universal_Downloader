@@ -520,10 +520,13 @@ class UniversalVideoDownloader(ctk.CTk):
                 if is_hardsub:
                     self.after(0, lambda: self.update_status("Re-encoding video with hardsubs (Burn-in)..."))
                     output_video_path = f"{name_no_ext}_hardsubbed.mp4"
+                    
+                    # Convert backslashes to forward slashes and escape the drive colon for Windows
+                    ffmpeg_subs_path = os.path.abspath(temp_subs_path).replace('\\', '/').replace(':', '\\:')
                     cmd = [
                         'ffmpeg', '-y',
                         '-i', final_video_path,
-                        '-vf', f"subtitles={temp_subs_path}",
+                        '-vf', f"subtitles='{ffmpeg_subs_path}'",
                         '-c:v', 'libx264',
                         '-preset', 'fast',
                         '-crf', '23',
@@ -544,8 +547,10 @@ class UniversalVideoDownloader(ctk.CTk):
                         output_video_path
                     ]
                 
-                # Execute FFmpeg subprocess safely using absolute file paths
-                result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+                # Execute FFmpeg subprocess safely capturing stderr and stdout
+                process = subprocess.run(cmd, capture_output=True, text=True)
+                if process.returncode != 0:
+                    raise Exception(f"FFmpeg Error:\n{process.stderr}")
                 
                 if os.path.exists(output_video_path):
                     # Remove original raw input video file
