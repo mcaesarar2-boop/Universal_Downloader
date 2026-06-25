@@ -152,6 +152,21 @@ class UniversalVideoDownloader(ctk.CTk):
         self.sub_mode_selector.pack(padx=30, pady=(0, 8))
         self.sub_mode_selector.set("Softsub (Fast Remux to .mkv)")
         
+        # Hardsub Video Bitrate Label & Entry
+        self.bitrate_label = ctk.CTkLabel(
+            self.main_frame,
+            text="Hardsub Video Bitrate (e.g., 1300k, 2000k):",
+            font=ctk.CTkFont(size=12, weight="bold")
+        )
+        self.bitrate_label.pack(anchor="w", padx=30, pady=(4, 2))
+        
+        self.bitrate_entry = ctk.CTkEntry(
+            self.main_frame,
+            width=500
+        )
+        self.bitrate_entry.pack(padx=30, pady=(0, 8))
+        self.bitrate_entry.insert(0, "1300k")
+        
         # 5. Custom Filename Input Area (Optional)
         self.filename_label = ctk.CTkLabel(
             self.main_frame,
@@ -592,6 +607,18 @@ class UniversalVideoDownloader(ctk.CTk):
                     self.after(0, lambda: self.update_status("Re-encoding video with hardsubs (Burn-in)..."))
                     output_video_path = f"{name_no_ext}_hardsubbed.mp4"
                     
+                    # Fetch target bitrate and compute buffer size (2x bitrate)
+                    target_bitrate = self.bitrate_entry.get().strip() or "1300k"
+                    bufsize = "2600k"
+                    try:
+                        match = re.match(r'^(\d+)(k|M|m|K)?$', target_bitrate)
+                        if match:
+                            val = int(match.group(1))
+                            unit = match.group(2) or 'k'
+                            bufsize = f"{val * 2}{unit}"
+                    except Exception:
+                        pass
+                    
                     # Convert backslashes to forward slashes and escape the drive colon for Windows
                     ffmpeg_subs_path = os.path.abspath(temp_subs_path).replace('\\', '/').replace(':', '\\:')
                     cmd = [
@@ -601,8 +628,9 @@ class UniversalVideoDownloader(ctk.CTk):
                         '-vf', f"subtitles='{ffmpeg_subs_path}'",
                         '-c:v', 'h264_nvenc',
                         '-preset', 'p6',
-                        '-cq', '23',
-                        '-b:v', '0',
+                        '-b:v', target_bitrate,
+                        '-maxrate', target_bitrate,
+                        '-bufsize', bufsize,
                         '-c:a', 'copy',
                         output_video_path
                     ]

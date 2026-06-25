@@ -700,6 +700,7 @@ export default function App() {
   const [subtitleStatusColorSim, setSubtitleStatusColorSim] = useState<string>("text-slate-400");
   const [isSubtitleVerifiedSim, setIsSubtitleVerifiedSim] = useState<boolean>(false);
   const [subModeSim, setSubModeSim] = useState<string>("Softsub (Fast Remux to .mkv)");
+  const [bitrateSim, setBitrateSim] = useState<string>("1300k");
   const [customFilenameSim, setCustomFilenameSim] = useState<string>('');
   const [isDownloadingSim, setIsDownloadingSim] = useState<boolean>(false);
   const [simProgress, setSimProgress] = useState<number>(0);
@@ -898,7 +899,8 @@ export default function App() {
             setSimStatusColor("text-amber-400");
             addLog(`[thread-2] Found pre-verified "temp_subs.vtt" file. Skipping HTTP requests download step.`);
             addLog(`[thread-2] Invoking FFmpeg subprocess command...`);
-            addLog(`[ffmpeg] Executing: ffmpeg -y -hwaccel cuda -i ${tempVideoFile} -vf "subtitles=temp_subs.vtt" -c:v h264_nvenc -preset p6 -cq 23 -b:v 0 -c:a copy ${finalMuxedFile}`);
+            const bufSizeCalculated = (parseInt(bitrateSim) * 2 || 2600) + 'k';
+            addLog(`[ffmpeg] Executing: ffmpeg -y -hwaccel cuda -i ${tempVideoFile} -vf "subtitles=temp_subs.vtt" -c:v h264_nvenc -preset p6 -b:v ${bitrateSim} -maxrate ${bitrateSim} -bufsize ${bufSizeCalculated} -c:a copy ${finalMuxedFile}`);
           } else {
             setSimStatusLabel("Muxing video & subtitle with FFmpeg...");
             setSimStatusColor("text-amber-400");
@@ -952,7 +954,8 @@ export default function App() {
               setSimStatusLabel("Re-encoding video with hardsubs (Burn-in)...");
               setSimStatusColor("text-amber-400");
               addLog(`[thread-2] Invoking FFmpeg subprocess command...`);
-              addLog(`[ffmpeg] Executing: ffmpeg -y -hwaccel cuda -i ${tempVideoFile} -vf "subtitles=temp_subs.vtt" -c:v h264_nvenc -preset p6 -cq 23 -b:v 0 -c:a copy ${finalMuxedFile}`);
+              const bufSizeCalculated = (parseInt(bitrateSim) * 2 || 2600) + 'k';
+              addLog(`[ffmpeg] Executing: ffmpeg -y -hwaccel cuda -i ${tempVideoFile} -vf "subtitles=temp_subs.vtt" -c:v h264_nvenc -preset p6 -b:v ${bitrateSim} -maxrate ${bitrateSim} -bufsize ${bufSizeCalculated} -c:a copy ${finalMuxedFile}`);
             } else {
               setSimStatusLabel("Muxing video & subtitle with FFmpeg...");
               setSimStatusColor("text-amber-400");
@@ -1266,6 +1269,21 @@ export default function App() {
                         </button>
                       </div>
                     </div>
+
+                    {/* Hardsub Video Bitrate Configuration */}
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs font-bold text-slate-300">Hardsub Video Bitrate (e.g., 1300k, 2000k):</label>
+                      <input 
+                        id="sim-bitrate-input"
+                        type="text"
+                        placeholder="e.g. 1300k"
+                        value={bitrateSim}
+                        onChange={(e) => setBitrateSim(e.target.value)}
+                        disabled={isDownloadingSim}
+                        className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-blue-500 disabled:opacity-50 placeholder:text-slate-600"
+                      />
+                    </div>
+
                     <div className="flex flex-col gap-1">
                       <label className="text-xs font-bold text-slate-300">Custom Filename (Optional):</label>
                       <input 
