@@ -34,7 +34,7 @@ class UniversalVideoDownloader(ctk.CTk):
         
         # Window configuration
         self.title("Universal Video Downloader")
-        self.geometry("640x580")
+        self.geometry("640x650")
         self.resizable(False, False)
         
         # State variables
@@ -132,7 +132,23 @@ class UniversalVideoDownloader(ctk.CTk):
             font=ctk.CTkFont(size=11, slant="italic"),
             text_color="#a3a3a3"
         )
-        self.subtitle_status_label.pack(anchor="w", padx=30, pady=(0, 10))
+        self.subtitle_status_label.pack(anchor="w", padx=30, pady=(0, 4))
+        
+        # Subtitle Processing Mode label & Segmented Button
+        self.sub_mode_label = ctk.CTkLabel(
+            self.main_frame,
+            text="Subtitle Processing Mode:",
+            font=ctk.CTkFont(size=12, weight="bold")
+        )
+        self.sub_mode_label.pack(anchor="w", padx=30, pady=(4, 2))
+        
+        self.sub_mode_selector = ctk.CTkSegmentedButton(
+            self.main_frame,
+            values=["Softsub (Fast Remux to .mkv)", "Hardsub (Burn-in Re-encode to .mp4)"],
+            width=500
+        )
+        self.sub_mode_selector.pack(padx=30, pady=(0, 10))
+        self.sub_mode_selector.set("Softsub (Fast Remux to .mkv)")
         
         # 5. Custom Filename Input Area (Optional)
         self.filename_label = ctk.CTkLabel(
@@ -352,11 +368,14 @@ class UniversalVideoDownloader(ctk.CTk):
         self.set_progress(0)
         self.update_status("Initializing download pipeline...")
         
+        # Get subtitle mode from selector
+        sub_mode = self.sub_mode_selector.get()
+        
         # Spin up daemon thread to prevent freezing the main UI
-        thread = threading.Thread(target=self._download_worker, args=(url,), daemon=True)
+        thread = threading.Thread(target=self._download_worker, args=(url, sub_mode), daemon=True)
         thread.start()
 
-    def _download_worker(self, url):
+    def _download_worker(self, url, sub_mode):
         selected_fmt = self.format_selector.get()
         subtitle_url = self.subtitle_url_entry.get().strip()
         custom_name = self.custom_filename_entry.get().strip()
@@ -494,30 +513,43 @@ class UniversalVideoDownloader(ctk.CTk):
                 has_subtitle = True
                 
             if has_subtitle:
-                self.after(0, lambda: self.update_status("Remuxing video & subtitle with FFmpeg..."))
-                
-                # Mux video and subtitles into single final media container using absolute paths
+                # Mux or burn-in subtitles depending on the selected mode
                 name_no_ext, _ = os.path.splitext(final_video_path)
-                muxed_video_path = f"{name_no_ext}_muxed.mkv"
+                is_hardsub = "Hardsub" in sub_mode
                 
-                # Strict FFmpeg command mapping all inputs and setting disposition
-                cmd = [
-                    'ffmpeg', '-y',
-                    '-i', final_video_path,
-                    '-i', temp_subs_path,
-                    '-c', 'copy',
-                    '-map', '0',
-                    '-map', '1',
-                    '-disposition:s:0', 'default',
-                    muxed_video_path
-                ]
+                if is_hardsub:
+                    self.after(0, lambda: self.update_status("Re-encoding video with hardsubs (Burn-in)..."))
+                    output_video_path = f"{name_no_ext}_hardsubbed.mp4"
+                    cmd = [
+                        'ffmpeg', '-y',
+                        '-i', final_video_path,
+                        '-vf', f"subtitles={temp_subs_path}",
+                        '-c:v', 'libx264',
+                        '-preset', 'fast',
+                        '-crf', '23',
+                        '-c:a', 'copy',
+                        output_video_path
+                    ]
+                else:
+                    self.after(0, lambda: self.update_status("Remuxing video & subtitle with FFmpeg..."))
+                    output_video_path = f"{name_no_ext}_muxed.mkv"
+                    cmd = [
+                        'ffmpeg', '-y',
+                        '-i', final_video_path,
+                        '-i', temp_subs_path,
+                        '-c', 'copy',
+                        '-map', '0',
+                        '-map', '1',
+                        '-disposition:s:0', 'default',
+                        output_video_path
+                    ]
                 
                 # Execute FFmpeg subprocess safely using absolute file paths
                 result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
                 
-                if os.path.exists(muxed_video_path):
+                if os.path.exists(output_video_path):
                     # Remove original raw input video file
-                    if os.path.exists(final_video_path) and final_video_path != muxed_video_path:
+                    if os.path.exists(final_video_path) and final_video_path != output_video_path:
                         try:
                             os.remove(final_video_path)
                         except Exception as e:
@@ -530,10 +562,11 @@ class UniversalVideoDownloader(ctk.CTk):
                         except Exception as e:
                             print(f"Error removing raw input subtitle: {e}")
                             
-                    final_video_path = muxed_video_path
-                    self.after(0, lambda: self.update_status("Subtitle track remuxed successfully.", "#4ade80"))
+                    final_video_path = output_video_path
+                    msg = "Subtitle track hardsubbed successfully." if is_hardsub else "Subtitle track remuxed successfully."
+                    self.after(0, lambda: self.update_status(msg, "#4ade80"))
                 else:
-                    raise Exception("FFmpeg execution finished, but the muxed output file was not generated.")
+                    raise Exception("FFmpeg execution finished, but the output file was not generated.")
 
             self.after(0, lambda: self._on_download_success(final_video_path))
             
