@@ -25,6 +25,47 @@ from tkinter import messagebox
 import customtkinter as ctk
 import yt_dlp
 
+def probe_bitrate(stream_url, height):
+    """
+    Attempts to probe the bitrate of a stream URL using ffprobe.
+    Falls back to a resolution-based estimate if it fails.
+    """
+    if stream_url:
+        try:
+            cmd = [
+                'ffprobe',
+                '-v', 'error',
+                '-show_entries', 'format=bit_rate',
+                '-of', 'default=noprint_wrappers=1:nokey=1',
+                stream_url
+            ]
+            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=3)
+            if result.returncode == 0:
+                output = result.stdout.strip()
+                if output and output.isdigit():
+                    bps = int(output)
+                    kbps = int(bps / 1000)
+                    if kbps > 0:
+                        return f"~{kbps} kbps (Probed)"
+        except Exception:
+            pass
+            
+    # Resolution-based standard fallback estimation
+    if height:
+        try:
+            h = int(height)
+            if h >= 1080:
+                return "~3500 kbps (Est.)"
+            elif h >= 720:
+                return "~2000 kbps (Est.)"
+            elif h >= 480:
+                return "~1000 kbps (Est.)"
+            else:
+                return "~500 kbps (Est.)"
+        except (ValueError, TypeError):
+            pass
+    return "Unknown"
+
 # Set modern look and dark theme
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -307,7 +348,10 @@ class UniversalVideoDownloader(ctk.CTk):
                         vbr = f.get('vbr')
                         tbr = f.get('tbr')
                         bitrate_val = vbr or tbr
-                        bitrate_str = f"~{int(bitrate_val)} kbps" if bitrate_val else "Unknown"
+                        if bitrate_val:
+                            bitrate_str = f"~{int(bitrate_val)} kbps"
+                        else:
+                            bitrate_str = probe_bitrate(f.get('url'), height)
                         parsed_formats.append({
                             'label': f"{height}p - {ext}",
                             'height': height,
