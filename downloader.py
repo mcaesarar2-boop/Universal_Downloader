@@ -325,7 +325,7 @@ class VideoDownloaderApp(ctk.CTk):
         duration = info.get('duration', 0)
         extractor = info.get('extractor_key', 'Generic URL')
         
-        mins, secs = divmod(duration, 60)
+        mins, secs = divmod(int(duration or 0), 60)
         hours, mins = divmod(mins, 60)
         duration_str = f"{hours:02d}:{mins:02d}:{secs:02d}" if hours else f"{mins:02d}:{secs:02d}"
         
@@ -430,7 +430,7 @@ class VideoDownloaderApp(ctk.CTk):
                         
                 eta_str = "--:--"
                 if eta:
-                    m, s = divmod(eta, 60)
+                    m, s = divmod(int(eta), 60)
                     eta_str = f"{m:02d}:{s:02d}"
                     
                 self.after(0, lambda: self._update_gui_progress(pct, speed_str, eta_str, size_mb))
